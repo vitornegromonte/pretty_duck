@@ -1,4 +1,9 @@
-"""End-to-end experiment on SmolLM-135M (a real, trained model).
+"""End-to-end experiment on a real, trained SmolLM model.
+
+Usage (repo root):  python experiments/run_smollm.py [HF_MODEL_ID]
+Default model: HuggingFaceTB/SmolLM-135M; artifacts go to
+outputs/<model-short-name>/ (so different models never clobber each other
+and interrupted runs resume from the first missing artifact).
 
 Compares, at comparable storage budgets:
     baseline            -- no compression (original weights)
@@ -7,8 +12,6 @@ Compares, at comparable storage budgets:
     hetero_contrastive  -- same, with contrastive importance as auxiliary signal
 
 Target domain = wealth (Persona/data/wealth_*), secondary = honesty (h_*).
-Run from the repo root:  .venv/bin/python experiments/run_smollm.py
-All artifacts and the final report land in outputs/smollm/.
 """
 
 import json
@@ -20,8 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
 
 from compress.cli import main as cli
 
-MODEL = "HuggingFaceTB/SmolLM-135M"
-OUT = Path("outputs/smollm")
+MODEL = sys.argv[1] if len(sys.argv) > 1 else "HuggingFaceTB/SmolLM-135M"
+OUT = Path("outputs") / MODEL.split("/")[-1].lower()
 DATA = Path("Persona/data")
 SIZE_FRACTION = 0.5  # heterogeneous runs target 50% of the fp16 Linear payload
 LAM = 0.5

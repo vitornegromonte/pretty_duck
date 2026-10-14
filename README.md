@@ -102,6 +102,36 @@ python experiments/run_smollm.py   # SmolLM-135M, wealth target, honesty seconda
 * Persona's sparse-mask method (weight zeroing) is a different mechanism from
   quantization and is preserved untouched in `Persona/`.
 
+## Run on Colab
+
+Use a GPU runtime (T4 is plenty). In three cells:
+
+```python
+# cell 1
+!git clone -b feature/domain-compression https://github.com/vitornegromonte/pretty_duck.git
+%cd pretty_duck
+```
+
+```python
+# cell 2 — full pipeline (SmolLM-360M default; ~10 min on T4)
+!bash colab/run_all.sh
+# or: !bash colab/run_all.sh HuggingFaceTB/SmolLM-135M
+```
+
+```python
+# cell 3 — results table
+import json, pandas as pd
+r = json.load(open("outputs/smollm-360m/report.json"))
+rows = [{"config": k, **{k2: v for k2, v in c.items() if not isinstance(v, str)}}
+        for k, c in r["configs"].items()]
+pd.DataFrame(rows).set_index("config")
+```
+
+On GPU the CLI automatically evaluates in fp16 (recorded as `dtype` in the
+reports); `bnb_nf4` runs through bitsandbytes' CUDA path. Interrupted runs
+resume: each stage is skipped when its artifact already exists under
+`outputs/<model>/`.
+
 ## Tests
 
 ```bash

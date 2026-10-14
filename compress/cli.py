@@ -21,10 +21,43 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from . import stats as stats_mod
 from . import serialize
-from .allocate import estimate_blocks, build_plan, load_plan, save_plan
+from .allocate import estimate_blocks, estimate_model_blocks, build_plan, load_plan, save_plan
 from .evaluate import evaluate_mc
 
 DEFAULT_FORMATS = "fp16,int8,int4,nf4"
+
+
+def _safetensors_path(model_path: str) -> Path | None:
+    """Single-file safetensors checkpoint (the streamed, low-RAM path)."""
+    p = Path(model_path) / "model.safetensors"
+    return p if p.exists() else None
+
+
+def _weight_from_safetensors(path: Path, name: str):
+    """Read one Linear weight from a single-file checkpoint.
+
+    Falls back to the embedding matrix for ``lm_head`` when embeddings are
+    tied and the head is therefore not stored separately.
+    """
+    from safetensors import safe_open
+
+    with safe_open(str(path), framework="pt") as f:
+        keys = set(f.keys())
+        key = f"{name}.weight"
+        if key in keys:
+            return f.get_tensor(key)
+        if name == "lm_head" and "model.embed_tokens.weight" in keys:
+            return f.get_tensor("model.embed_tokens.weight")
+        raise KeyError(key)
+
+
+def _stream_weights(path: Path, layer_names):
+    """Yield ``(name, weight)`` for the requested layers, one tensor at a time.
+
+    Only one weight matrix is resident at any moment (per-call file open).
+    """
+    for name in sorted(layer_names):
+        yield name, _weight_from_safetensors(path, name)
 
 
 def _parse_pairs(values: list[str], what: str) -> dict[str, str]:
@@ -43,7 +76,9 @@ def _load_model(path: str):
     import transformers
 
     kwarg = "dtype" if int(transformers.__version__.split(".")[0]) >= 5 else "torch_dtype"
-    dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+    # CPU runs use bf16: half the resident memory of fp32, and every compared
+    # configuration is evaluated in the same dtype so comparisons stay fair.
+    dtype = torch.float16 if torch.cuda.is_available() else torch.bfloat16
     model = AutoModelForCausalLM.from_pretrained(path, **{kwarg: dtype})
     tokenizer = AutoTokenizer.from_pretrained(path)
     if tokenizer.pad_token is None:
@@ -75,20 +110,32 @@ def cmd_collect_stats(args) -> dict:
 
 
 def cmd_estimate_quant_error(args) -> dict:
-    model, _ = _load_model(args.model_path)
     domains, meta = stats_mod.load_stats(args.stats)
     formats = [f for f in args.formats.split(",") if f]
-    estimates = estimate_blocks(model, domains, formats)
+    names = sorted(next(iter(domains.values())))
+
+    estimates, source = None, "model-load"
+    st = _safetensors_path(args.model_path)
+    if st is not None:
+        try:  # low-RAM path: stream one weight at a time from the checkpoint
+            estimates = estimate_blocks(_stream_weights(st, names), domains, formats)
+            source = "safetensors"
+        except KeyError:  # stats layer missing from the checkpoint -> full load
+            estimates = None
+    if estimates is None:
+        model, _ = _load_model(args.model_path)
+        estimates = estimate_model_blocks(model, domains, formats)
+
     # JSON needs lists, not tuples.
     for e in estimates.values():
         e["shape"] = list(e["shape"])
     blob = {
         "meta": {"model": args.model_path, "stats_file": str(args.stats),
-                 "stats_meta": meta, "formats": formats},
+                 "stats_meta": meta, "formats": formats, "weights_source": source},
         "layers": estimates,
     }
     Path(args.out).write_text(json.dumps(blob, indent=1, sort_keys=True))
-    return {"out": args.out, "layers": len(estimates), "formats": formats}
+    return {"out": args.out, "layers": len(estimates), "formats": formats, "weights_source": source}
 
 
 def cmd_allocate_bits(args) -> dict:
@@ -122,15 +169,27 @@ def cmd_allocate_bits(args) -> dict:
 
 
 def cmd_quantize_model(args) -> dict:
-    model, _ = _load_model(args.model_path)
     plan = load_plan(args.plan)
-    manifest = serialize.save_compressed(model, plan, args.out_dir)
+    manifest, source = None, "model-load"
+    st = _safetensors_path(args.model_path)
+    if st is not None:
+        try:  # low-RAM path: quantize straight from the memory-mapped checkpoint
+            manifest = serialize.save_compressed_streamed(
+                lambda name: _weight_from_safetensors(st, name), plan, args.out_dir
+            )
+            source = "safetensors"
+        except KeyError:
+            manifest = None
+    if manifest is None:
+        model, _ = _load_model(args.model_path)
+        manifest = serialize.save_compressed(model, plan, args.out_dir)
     return {
         "out_dir": str(args.out_dir),
         "blocks": len(manifest["blocks"]),
         "compressed_tensor_bytes": manifest["totals"]["file_nbytes"],
         "fp16_reference_bytes": manifest["totals"]["fp16_reference_nbytes"],
         "dir_bytes": serialize.measure_bytes(args.out_dir),
+        "weights_source": source,
     }
 
 
@@ -146,6 +205,7 @@ def cmd_evaluate_compression(args) -> dict:
         raise SystemExit("provide at least one --test name=file.csv")
     report = {
         "model": args.model_path,
+        "dtype": str(next(model.parameters()).dtype),  # bf16 on CPU, fp16 on CUDA
         "compressed_dir": str(args.compressed_dir) if args.compressed_dir else None,
         "compressed_blocks": n,
         "model_param_bytes": sum(p.numel() * p.element_size() for p in model.parameters()),

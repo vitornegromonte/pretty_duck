@@ -85,6 +85,13 @@ python experiments/run_smollm.py   # SmolLM-135M, wealth target, honesty seconda
 
 ## Limitations
 
+* `estimate_quant_error` and `quantize_model` stream weights straight from
+  the checkpoint's `model.safetensors` (one matrix in memory at a time) when
+  a single-file checkpoint is present, and fall back to a full model load
+  otherwise. Multi-file sharded checkpoints use the fallback.
+* `evaluate_compression` still loads the whole model: fp16 on CUDA, **bf16
+  on CPU** (half the RAM of fp32; recorded as `dtype` in every report, and
+  identical across compared configurations).
 * Only `nn.Linear` weights are compressed; embeddings/norms reload from the
   base model at their original precision.
 * The allocator accepts portable formats only (`fp16/int8/int4/nf4`);

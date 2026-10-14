@@ -32,11 +32,15 @@ from .quant import PORTABLE_FORMATS, is_available, quantize_weight, quant_error,
 
 
 def estimate_blocks(
-    model: torch.nn.Module,
+    weights,
     domains_stats: dict[str, dict],
     formats: list[str],
 ) -> dict[str, dict]:
     """Per-Linear shape, importance and diagonal quantization error.
+
+    ``weights`` is an iterable of ``(layer_name, weight_tensor)`` pairs, so
+    callers can stream tensors from a safetensors file one layer at a time
+    instead of materializing a full model (the low-RAM path used by the CLI).
 
     Returns ``{layer_name: {"shape": (o, i), "nbytes": {fmt: int},
     "importance": {domain: float}, "error": {domain: {fmt: float}}}}``.
@@ -46,10 +50,12 @@ def estimate_blocks(
         if not ok:
             raise ValueError(reason)
 
-    names = dict(model.named_modules())
+    _validate_stats_coverage(domains_stats)
     estimates: dict[str, dict] = {}
-    for name, _stats in _iter_layer_stats(names, domains_stats):
-        W = names[name].weight.detach().float()
+    for name, weight in weights:
+        if weight.dim() != 2:
+            raise ValueError(f"{name}: expected a 2-D Linear weight, got {weight.dim()}-D")
+        W = weight.detach().float()
         errors = {d: {} for d in domains_stats}
         for fmt in formats:  # quantize once per format, reuse across domains
             q = quantize_weight(W, fmt)
@@ -65,22 +71,31 @@ def estimate_blocks(
             },
             "error": errors,
         }
+    missing = _stats_names(domains_stats) - set(estimates)
+    if missing:
+        raise KeyError(f"weights iterator did not yield layers: {sorted(missing)[:5]}")
     return estimates
 
 
-def _iter_layer_stats(named_modules: dict, domains_stats: dict):
-    """Yield (name, stats) for Linear layers that have stats in every domain."""
-    any_domain = next(iter(domains_stats.values()))
-    for name, stats in any_domain.items():
-        module = named_modules.get(name)
-        if module is None:
-            raise KeyError(f"stats refer to unknown module {name!r}")
-        if not isinstance(module, torch.nn.Linear):
-            raise TypeError(f"stats for {name!r} but module is {type(module).__name__}")
-        for domain, dstats in domains_stats.items():
-            if name not in dstats:
-                raise KeyError(f"layer {name!r} missing from domain {domain!r}")
-        yield name, stats
+def estimate_model_blocks(model, domains_stats: dict[str, dict], formats: list[str]) -> dict[str, dict]:
+    """Convenience wrapper of :func:`estimate_blocks` for an in-memory model."""
+    linears = (
+        (name, module.weight) for name, module in model.named_modules()
+        if isinstance(module, torch.nn.Linear)
+    )
+    return estimate_blocks(linears, domains_stats, formats)
+
+
+def _stats_names(domains_stats: dict[str, dict]) -> set[str]:
+    return set(next(iter(domains_stats.values())))
+
+
+def _validate_stats_coverage(domains_stats: dict[str, dict]) -> None:
+    """Every domain must carry stats for exactly the same layers."""
+    names = _stats_names(domains_stats)
+    for domain, dstats in domains_stats.items():
+        if set(dstats) != names:
+            raise KeyError(f"domain {domain!r} layers differ from the other domains")
 
 
 def _bits(fmt: str) -> int:

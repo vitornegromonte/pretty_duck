@@ -21,15 +21,31 @@ from .quant import quantize_weight, dequantize_weight, storage_nbytes
 def save_compressed(
     model: torch.nn.Module, plan: dict, out_dir: str | Path
 ) -> dict:
+    """Quantize every planned block of an in-memory model (see streamed variant)."""
+    named = dict(model.named_modules())
+
+    def get_weight(name: str) -> torch.Tensor:
+        module = named.get(name)
+        if not isinstance(module, torch.nn.Linear):
+            raise KeyError(f"plan block {name!r} is not an nn.Linear in the model")
+        return module.weight.detach()
+
+    return save_compressed_streamed(get_weight, plan, out_dir)
+
+
+def save_compressed_streamed(
+    get_weight, plan: dict, out_dir: str | Path
+) -> dict:
     """Quantize every planned block and write tensors + manifest under ``out_dir``.
 
-    Returns the manifest dict (also written to ``out_dir/manifest.json``).
-    The model itself is not modified.
+    ``get_weight(name) -> Tensor`` may read one layer at a time (e.g. from a
+    memory-mapped safetensors file), so peak memory stays at one weight
+    matrix.  Returns the manifest dict (also written to
+    ``out_dir/manifest.json``).  No model object is modified.
     """
     out_dir = Path(out_dir)
     tensors_dir = out_dir / "tensors"
     tensors_dir.mkdir(parents=True, exist_ok=True)
-    named = dict(model.named_modules())
 
     manifest: dict = {
         "version": 1,
@@ -39,11 +55,10 @@ def save_compressed(
         "totals": {"payload_nbytes": 0, "file_nbytes": 0, "fp16_reference_nbytes": 0},
     }
     for name, spec in plan["blocks"].items():
-        module = named.get(name)
-        if not isinstance(module, torch.nn.Linear):
-            raise KeyError(f"plan block {name!r} is not an nn.Linear in the model")
         fmt = spec["format"]
-        W = module.weight.detach()
+        W = get_weight(name)
+        if W.dim() != 2:
+            raise ValueError(f"{name}: expected a 2-D Linear weight, got {W.dim()}-D")
         q = quantize_weight(W, fmt)
         file_path = tensors_dir / f"{name}.pt"
         payload = {"format": q.format, "shape": tuple(W.shape), "codes": q.codes, "scale": q.scale}

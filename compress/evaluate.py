@@ -1,0 +1,93 @@
+"""Multiple-choice evaluation, same protocol as Persona/contra.py.
+
+Each question offers options A and B; the model picks the option with the
+higher log-probability of the answer tokens (prompt tokens excluded from the
+loss, matching ``contra.phase3_multiple_choice``).  ``negate`` flips the
+correct label, which is how the anti-domain persona ("reject"/"negate") was
+scored in the original code.  The system prompt is configurable so the same
+evaluator works for any domain pair.
+"""
+
+from __future__ import annotations
+
+import csv
+import resource
+import time
+
+import torch
+
+# Llama-2 chat template, kept identical to Persona/contra.py so results stay
+# comparable with the original method.
+def build_prompt(system_prompt: str, user_prompt: str) -> str:
+    if system_prompt:
+        return f"[INST] <<SYS>>\n{system_prompt}\n<</SYS>>\n\n{user_prompt} [/INST]"
+    return f"[INST] {user_prompt} [/INST]"
+
+
+def option_logprob(
+    model, tokenizer, system_prompt: str, question: str, option: str, device
+) -> float:
+    """Log-probability the model assigns to ``option`` given the question."""
+    prompt = build_prompt(system_prompt, f"{question}\n\nAnswer:")
+    enc_prompt = tokenizer(prompt, return_tensors="pt").to(device)
+    enc_full = tokenizer(prompt + " " + option, return_tensors="pt").to(device)
+    input_ids = enc_full["input_ids"]
+    labels = input_ids.clone()
+    labels[:, : enc_prompt["input_ids"].shape[1]] = -100  # score answer only
+    with torch.no_grad():
+        out = model(input_ids=input_ids, attention_mask=enc_full["attention_mask"], labels=labels)
+    answer_len = max(1, int((labels != -100).sum().item()))
+    return -float(out.loss.item()) * answer_len  # total NLL of answer tokens
+
+
+def evaluate_mc(
+    model,
+    tokenizer,
+    test_file: str,
+    *,
+    negate: bool = False,
+    sys_prompt: str = "",
+    max_questions: int | None = None,
+) -> dict:
+    """Evaluate one ``*_test_infer.csv`` file; returns a metrics dict.
+
+    Accuracy is measured against the ``matching`` column (or its flip when
+    ``negate=True``).  Latency is wall-clock per question (two forward passes).
+    """
+    model.eval()
+    device = next(model.parameters()).device
+    correct = total = 0
+    total_ms = 0.0
+    with open(test_file, encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            if max_questions is not None and total >= max_questions:
+                break
+            question, a, b = row["question"].strip(), row["A"].strip(), row["B"].strip()
+            matching = row["matching"].strip().upper()
+            expected = matching if not negate else ("B" if matching == "A" else "A")
+
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            t0 = time.perf_counter()
+            logp_a = option_logprob(model, tokenizer, sys_prompt, question, a, device)
+            logp_b = option_logprob(model, tokenizer, sys_prompt, question, b, device)
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            total_ms += (time.perf_counter() - t0) * 1000.0
+
+            correct += int(("A" if logp_a >= logp_b else "B") == expected)
+            total += 1
+
+    if total == 0:
+        raise ValueError(f"no questions evaluated from {test_file}")
+    return {
+        "test_file": str(test_file),
+        "negate": negate,
+        "sys_prompt": sys_prompt,
+        "n": total,
+        "correct": correct,
+        "accuracy": 100.0 * correct / total,
+        "avg_latency_ms": total_ms / total,
+        # ru_maxrss is KiB on Linux.
+        "peak_rss_mb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0,
+    }

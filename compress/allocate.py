@@ -48,22 +48,23 @@ def estimate_blocks(
 
     names = dict(model.named_modules())
     estimates: dict[str, dict] = {}
-    for name, stats in _iter_layer_stats(names, domains_stats):
+    for name, _stats in _iter_layer_stats(names, domains_stats):
         W = names[name].weight.detach().float()
-        entry: dict = {
+        errors = {d: {} for d in domains_stats}
+        for fmt in formats:  # quantize once per format, reuse across domains
+            q = quantize_weight(W, fmt)
+            E = quant_error(W, q)
+            for domain, dstats in domains_stats.items():
+                errors[domain][fmt] = diagonal_error(E, dstats[name]["V"])
+        estimates[name] = {
             "shape": tuple(W.shape),
             "nbytes": {fmt: storage_nbytes(tuple(W.shape), fmt) for fmt in formats},
-            "importance": {},
-            "error": {},
+            "importance": {
+                domain: block_importance(W, dstats[name]["A"])
+                for domain, dstats in domains_stats.items()
+            },
+            "error": errors,
         }
-        for domain, dstats in domains_stats.items():
-            A, V = dstats[name]["A"], dstats[name]["V"]
-            entry["importance"][domain] = block_importance(W, A)
-            entry["error"][domain] = {}
-            for fmt in formats:
-                q = quantize_weight(W, fmt)
-                entry["error"][domain][fmt] = diagonal_error(quant_error(W, q), V)
-        estimates[name] = entry
     return estimates
 
 

@@ -14,3 +14,4 @@ runs/
 
 # Hugging Face cache
 .cache/
+outputs_run.log

@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Virtual env
+.venv/
+
+# Experiment outputs
+outputs/
+runs/
+*.pt
+!Persona/data/**
+
+# Hugging Face cache
+.cache/

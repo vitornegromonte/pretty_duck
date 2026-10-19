@@ -99,3 +99,19 @@ def test_cli_budget_errors_are_reported(capsys, model_dir, calib_file, tmp_path)
         _run(capsys, "allocate_bits", "--errors", errors, "--target", "T",
              "--formats", "fp16", "--size-budget", "10", "--out", tmp_path / "p.json")
     assert "error:" in capsys.readouterr().err
+
+
+def test_cli_applies_a_domain_mask(capsys, model_dir, calib_file, mc_file, tmp_path):
+    stats = tmp_path / "stats.pt"
+    _run(capsys, "collect_stats", "--model-path", model_dir,
+         "--calib", f"T={calib_file}", "--calib", f"S={calib_file}",
+         "--out", stats, "--n-samples", "8")
+    out = _run(capsys, "evaluate_compression", "--model-path", model_dir,
+               "--mask-kind", "magnitude", "--mask-stats", stats,
+               "--mask-seek", "T", "--mask-reject", "S", "--mask-sparsity", "0.5",
+               "--test", f"T={mc_file}", "--out", tmp_path / "masked.json")
+    assert out["mask"]["kind"] == "magnitude"
+    assert out["mask"]["layers"] > 0
+    assert 0.0 < out["mask"]["kept_fraction"] < 1.0
+    assert 0.0 <= out["results"]["T"]["accuracy"] <= 100.0
+

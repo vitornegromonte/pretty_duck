@@ -2,9 +2,10 @@
 
 For every ``torch.nn.Linear`` module in a model we accumulate, over all *valid*
 (non-padding) calibration tokens, the per-input-channel first absolute moment
-A[j] = E|h_j| and second moment V[j] = E[h_j^2].  These are exactly the
-quantities the Wanda-style importance and the diagonal quantization-error
-estimator need (see ``quant.py``).
+A[j] = E|h_j|, second moment V[j] = E[h_j^2], and signed mean M[j] = E[h_j].
+A and V are exactly the quantities the Wanda-style importance and the diagonal
+quantization-error estimator need (see ``quant.py``); M is what the
+domain-contrast score needs (see ``contrast.py``).
 
 Axis convention (kept everywhere downstream):
     ``nn.Linear.weight`` has shape (out_features, in_features); the hidden
@@ -80,6 +81,7 @@ class ActivationCollector:
         self._hooks: list[torch.utils.hooks.RemovableHandle] = []
         self._sum_abs: dict[str, torch.Tensor] = {}
         self._sum_sq: dict[str, torch.Tensor] = {}
+        self._sum_signed: dict[str, torch.Tensor] = {}
         self._counts: dict[str, int] = {}
 
     def observe(self, attention_mask: torch.Tensor | None) -> None:
@@ -102,6 +104,7 @@ class ActivationCollector:
             d = module.in_features
             self._sum_abs[name] = torch.zeros(d, dtype=_ACC_DTYPE, device=device)
             self._sum_sq[name] = torch.zeros(d, dtype=_ACC_DTYPE, device=device)
+            self._sum_signed[name] = torch.zeros(d, dtype=_ACC_DTYPE, device=device)
             self._counts[name] = 0
             self._hooks.append(module.register_forward_hook(self._make_hook(name, d)))
         return self
@@ -125,6 +128,7 @@ class ActivationCollector:
             flat = flat.to(_ACC_DTYPE)
             self._sum_abs[name] += flat.abs().sum(dim=0)
             self._sum_sq[name] += flat.square().sum(dim=0)
+            self._sum_signed[name] += flat.sum(dim=0)
             self._counts[name] += flat.shape[0]
 
         return hook
@@ -146,6 +150,7 @@ class ActivationCollector:
             name: {
                 "A": (self._sum_abs[name] / self._counts[name]).cpu(),
                 "V": (self._sum_sq[name] / self._counts[name]).cpu(),
+                "M": (self._sum_signed[name] / self._counts[name]).cpu(),
                 "count": self._counts[name],
             }
             for name in self._counts

@@ -51,7 +51,23 @@ python -m compress evaluate_compression \
 python -m compress evaluate_compression \
     --model-path Qwen/Qwen3.5-0.8B --mmlu law=professional_law:test \
     --out mmlu_report.json
+
+# Domain sub-network probe: zero weights by the math-vs-law activation contrast,
+# then score both domains under the same mask.
+python -m compress evaluate_compression \
+    --model-path Qwen/Qwen3.5-0.8B --mask-stats stats.pt \
+    --mask-kind contrast --mask-seek math --mask-reject law --mask-sparsity 0.3 \
+    --mmlu law=professional_law:test --test math=math_test.csv \
+    --out masked.json
 ```
+
+`--mask-kind` is one of `contrast` (signed `|W|*relu(z)`), `contrast_abs`
+(`|W|*|z|`), `inverse` (`|W|*relu(-z)`, the anti-domain control), `magnitude`,
+`wanda` (domain-agnostic activation norm), `random`, or `none`.
+`contrast`/`inverse`/`contrast_abs` also need `--mask-seek` and `--mask-reject`
+from the stats file.  The mask is applied after any `--compressed-dir` weights
+are loaded, per output row, in place; the report's `mask` block records what
+was actually zeroed.
 
 `--target` accepts any domain present in the stats file: the pipeline is
 domain-agnostic.  `--signal contrastive` prioritizes blocks using

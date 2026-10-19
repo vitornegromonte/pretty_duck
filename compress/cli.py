@@ -23,6 +23,7 @@ from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 from . import stats as stats_mod
 from . import serialize
 from .allocate import estimate_blocks, estimate_model_blocks, build_plan, load_plan, save_plan
+from .contrast import MASK_KINDS, apply_domain_mask
 from .evaluate import PROMPT_STYLES, evaluate_mc, evaluate_mmlu
 
 DEFAULT_FORMATS = "fp16,int8,int4,nf4"
@@ -248,6 +249,17 @@ def cmd_evaluate_compression(args) -> dict:
         manifest = json.loads((Path(args.compressed_dir) / "manifest.json").read_text())
     else:
         n, manifest = 0, None
+    mask = None
+    if args.mask_kind != "none":
+        if not (args.mask_stats and args.mask_seek and args.mask_reject):
+            raise SystemExit(
+                "--mask-kind requires --mask-stats, --mask-seek and --mask-reject"
+            )
+        domains, _ = stats_mod.load_stats(args.mask_stats)
+        mask = apply_domain_mask(
+            model, domains, kind=args.mask_kind, seek=args.mask_seek,
+            reject=args.mask_reject, sparsity=args.mask_sparsity, seed=args.mask_seed,
+        )
     tests = _parse_pairs(args.test, "test")
     mmlu = _parse_mmlu(args.mmlu)
     if not tests and not mmlu:
@@ -274,6 +286,7 @@ def cmd_evaluate_compression(args) -> dict:
         "compressed_dir": str(args.compressed_dir) if args.compressed_dir else None,
         "compressed_blocks": n,
         "model_param_bytes": sum(p.numel() * p.element_size() for p in model.parameters()),
+        "mask": mask,
         "results": results,
     }
     if manifest is not None:
@@ -332,6 +345,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--test", action="append", default=[], metavar="NAME=FILE")
     p.add_argument("--mmlu", action="append", default=[], metavar="NAME=SUBJECT[:SPLIT]")
     p.add_argument("--mmlu-cache", default=None)
+    p.add_argument("--mask-kind", choices=MASK_KINDS, default="none")
+    p.add_argument("--mask-stats", default=None)
+    p.add_argument("--mask-seek", default=None)
+    p.add_argument("--mask-reject", default=None)
+    p.add_argument("--mask-sparsity", type=float, default=0.3)
+    p.add_argument("--mask-seed", type=int, default=0)
     p.add_argument("--negate", action="store_true")
     p.add_argument("--sys-prompt", default="")
     p.add_argument("--prompt-style", choices=PROMPT_STYLES, default="auto")

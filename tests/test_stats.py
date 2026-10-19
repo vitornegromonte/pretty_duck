@@ -15,7 +15,7 @@ from tests.conftest import CALIB_LINES
 
 def _manual_moments(model, tokenizer, lines, max_len=16):
     """Reference implementation: single-line batches, explicit masking."""
-    sums, sqs, counts = {}, {}, {}
+    sums, sqs, signed, counts = {}, {}, {}, {}
     hooks = []
     tied = tied_weight_ptrs(model)
 
@@ -24,6 +24,7 @@ def _manual_moments(model, tokenizer, lines, max_len=16):
             x = inputs[0].reshape(-1, d)
             sums[name] = sums.get(name, 0) + x.double().abs().sum(0)
             sqs[name] = sqs.get(name, 0) + x.double().square().sum(0)
+            signed[name] = signed.get(name, 0) + x.double().sum(0)
             counts[name] = counts.get(name, 0) + x.shape[0]
         return hook
 
@@ -37,7 +38,8 @@ def _manual_moments(model, tokenizer, lines, max_len=16):
     for h in hooks:
         h.remove()
     return {
-        n: (sums[n] / counts[n], sqs[n] / counts[n], counts[n]) for n in sums
+        n: (sums[n] / counts[n], sqs[n] / counts[n], signed[n] / counts[n], counts[n])
+        for n in sums
     }
 
 
@@ -47,10 +49,11 @@ def test_batching_and_masking_match_manual_reference(tiny_model, tokenizer):
     )
     want = _manual_moments(tiny_model, tokenizer, CALIB_LINES)
     assert set(got) == set(want)
-    for name, (A, V, count) in want.items():
+    for name, (A, V, M, count) in want.items():
         assert got[name]["count"] == count
         assert torch.allclose(got[name]["A"], A, atol=1e-10)
         assert torch.allclose(got[name]["V"], V, atol=1e-10)
+        assert torch.allclose(got[name]["M"], M, atol=1e-10)
 
 
 def test_padding_positions_are_excluded(tiny_model, tokenizer):
@@ -67,6 +70,7 @@ def test_padding_positions_are_excluded(tiny_model, tokenizer):
         assert got[name]["count"] == int(enc["attention_mask"].sum())  # pads not counted
         assert torch.allclose(got[name]["A"], short[name]["A"], atol=1e-10)
         assert torch.allclose(got[name]["V"], short[name]["V"], atol=1e-10)
+        assert torch.allclose(got[name]["M"], short[name]["M"], atol=1e-10)
 
 
 def test_tied_lm_head_is_not_collected(tiny_model, tokenizer):

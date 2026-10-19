@@ -115,8 +115,8 @@ Use a GPU runtime (T4 is plenty). In three cells:
 
 ```python
 # cell 2 — full pipeline (SmolLM-360M default; ~10 min on T4)
-!bash colab/run_all.sh
-# or: !bash colab/run_all.sh HuggingFaceTB/SmolLM-135M
+!bash script/run_all.sh
+# or: !bash script/run_all.sh HuggingFaceTB/SmolLM-135M
 ```
 
 ```python

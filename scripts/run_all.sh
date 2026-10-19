@@ -2,8 +2,8 @@
 # One-shot Colab runner. In a Colab cell (GPU runtime recommended):
 #   !git clone -b feature/domain-compression https://github.com/vitornegromonte/pretty_duck.git
 #   %cd pretty_duck
-#   !bash colab/run_all.sh                       # default: SmolLM-360M
-#   !bash colab/run_all.sh HF/user-model         # any single-file HF checkpoint
+#   !bash script/run_all.sh                       # default: SmolLM-360M
+#   !bash script/run_all.sh HF/user-model         # any single-file HF checkpoint
 set -euo pipefail
 
 MODEL="${1:-HuggingFaceTB/SmolLM-360M}"

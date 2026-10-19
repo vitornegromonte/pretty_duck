@@ -86,7 +86,7 @@ def main() -> None:
     if not errors.exists():
         timings["estimate_quant_error"] = run(
             "estimate_quant_error", "--model-path", MODEL,
-            "--stats", stats, "--formats", "fp16,int8,int4,nf4,bnb_nf4", "--out", errors,
+            "--stats", stats, "--formats", "fp16,int8,int4,nf4", "--out", errors,
         )
 
     est = json.loads(errors.read_text())["layers"]

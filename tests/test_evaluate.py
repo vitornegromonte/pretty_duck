@@ -24,6 +24,18 @@ def test_answer_mask_starts_exactly_after_the_prompt(tiny_model, tokenizer):
         )["input_ids"][0].tolist()
 
 
+def test_prompt_uses_tokenizer_chat_template():
+    class ChatTokenizer:
+        chat_template = "template"
+
+        def apply_chat_template(self, messages, tokenize, add_generation_prompt):
+            assert tokenize is False and add_generation_prompt is True
+            assert messages == [{"role": "user", "content": "w1?"}]
+            return "CHAT"
+
+    assert build_prompt("", "w1?", ChatTokenizer()) == "CHAT"
+
+
 def test_option_logprob_is_finite(tiny_model, tokenizer):
     value = option_logprob(tiny_model, tokenizer, "", "w1 w2?", "w3 w4", "cpu")
     assert math.isfinite(value)

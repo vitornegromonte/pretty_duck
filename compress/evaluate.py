@@ -1,11 +1,11 @@
-"""Multiple-choice evaluation, same protocol as Persona/contra.py.
+"""Multiple-choice evaluation, same scoring as Persona/contra.py.
 
 Each question offers options A and B; the model picks the option with the
 higher log-probability of the answer tokens (prompt tokens excluded from the
 loss, matching ``contra.phase3_multiple_choice``).  ``negate`` flips the
 correct label, which is how the anti-domain persona ("reject"/"negate") was
-scored in the original code.  The system prompt is configurable so the same
-evaluator works for any domain pair.
+scored in the original code.  The prompt uses the tokenizer's chat template
+when it has one, so the evaluator works across model families.
 """
 
 from __future__ import annotations
@@ -15,19 +15,31 @@ import time
 
 import torch
 
-# Llama-2 chat template, kept identical to Persona/contra.py so results stay
-# comparable with the original method.
-def build_prompt(system_prompt: str, user_prompt: str) -> str:
+def build_prompt(system_prompt: str, user_prompt: str, tokenizer=None) -> str:
+    """Use the model's own chat template when it has one, else plain completion.
+
+    The hard-coded Llama-2 ``[INST]`` wrapper from ``Persona/contra.py`` is
+    wrong for other families (e.g. Qwen), so prompts follow the tokenizer.
+    """
+    template = getattr(tokenizer, "chat_template", None) if tokenizer is not None else None
+    if template:
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
+        return tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
     if system_prompt:
-        return f"[INST] <<SYS>>\n{system_prompt}\n<</SYS>>\n\n{user_prompt} [/INST]"
-    return f"[INST] {user_prompt} [/INST]"
+        return f"{system_prompt}\n\n{user_prompt}"
+    return user_prompt
 
 
 def option_logprob(
     model, tokenizer, system_prompt: str, question: str, option: str, device
 ) -> float:
     """Log-probability the model assigns to ``option`` given the question."""
-    prompt = build_prompt(system_prompt, f"{question}\n\nAnswer:")
+    prompt = build_prompt(system_prompt, f"{question}\n\nAnswer:", tokenizer)
     enc_prompt = tokenizer(prompt, return_tensors="pt").to(device)
     enc_full = tokenizer(prompt + " " + option, return_tensors="pt").to(device)
     input_ids = enc_full["input_ids"]

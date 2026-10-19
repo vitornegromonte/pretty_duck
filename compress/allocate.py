@@ -29,7 +29,6 @@ import torch
 
 from .quant import PORTABLE_FORMATS, is_available, quantize_weight, quant_error, \
     diagonal_error, block_importance, storage_nbytes
-from .stats import tied_weight_ptrs
 
 
 def estimate_blocks(
@@ -86,14 +85,16 @@ def estimate_blocks(
 def estimate_model_blocks(model, domains_stats: dict[str, dict], formats: list[str]) -> dict[str, dict]:
     """Convenience wrapper of :func:`estimate_blocks` for an in-memory model.
 
-    Tied weights (e.g. a tied ``lm_head``) are skipped, matching the stats
-    collector; they are not compressed independently.
+    Only layers present in the stats are estimated, so tied weights and
+    non-text towers (vision) are skipped exactly as in the stats collector.
     """
-    tied = tied_weight_ptrs(model)
-    linears = (
-        (name, module.weight) for name, module in model.named_modules()
-        if isinstance(module, torch.nn.Linear) and module.weight.data_ptr() not in tied
-    )
+    named = dict(model.named_modules())
+    linears = []
+    for name in _stats_names(domains_stats):
+        module = named.get(name)
+        if not isinstance(module, torch.nn.Linear):
+            raise KeyError(f"stats layer {name!r} is not an nn.Linear in the model")
+        linears.append((name, module.weight))
     return estimate_blocks(linears, domains_stats, formats)
 
 

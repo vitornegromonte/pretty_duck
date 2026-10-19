@@ -40,6 +40,25 @@ def tied_weight_ptrs(model: torch.nn.Module) -> set[int]:
     return {ptr for ptr, n in seen.items() if n > 1}
 
 
+def _text_tower_prefix(model: torch.nn.Module) -> str:
+    """Full name of the module holding the text decoder ('' means the model).
+
+    Multimodal checkpoints (e.g. Qwen3.5-Base) also carry a vision tower whose
+    Linears never run on text; their stats are neither collectable nor useful.
+    """
+    get_decoder = getattr(model, "get_decoder", None)
+    if get_decoder is None:
+        return ""
+    try:
+        text = get_decoder()
+    except Exception:
+        return ""
+    for name, module in model.named_modules():
+        if module is text:
+            return "" if module is model else name
+    return ""
+
+
 class ActivationCollector:
     """Forward-hook collector for per-channel activation moments.
 
@@ -69,16 +88,22 @@ class ActivationCollector:
 
     def __enter__(self) -> "ActivationCollector":
         tied = tied_weight_ptrs(self.model)
+        prefix = _text_tower_prefix(self.model)
+        head = getattr(self.model, "get_output_embeddings", lambda: None)()
         device = next(self.model.parameters()).device
         for name, module in self.model.named_modules():
-            if isinstance(module, torch.nn.Linear) and module.weight.data_ptr() not in tied:
-                d = module.in_features
-                self._sum_abs[name] = torch.zeros(d, dtype=_ACC_DTYPE, device=device)
-                self._sum_sq[name] = torch.zeros(d, dtype=_ACC_DTYPE, device=device)
-                self._counts[name] = 0
-                self._hooks.append(
-                    module.register_forward_hook(self._make_hook(name, d))
-                )
+            if not isinstance(module, torch.nn.Linear) or module.weight.data_ptr() in tied:
+                continue
+            # Skip non-text towers (vision) of multimodal models.
+            if prefix and not (
+                module is head or name == "lm_head" or name.startswith(prefix + ".")
+            ):
+                continue
+            d = module.in_features
+            self._sum_abs[name] = torch.zeros(d, dtype=_ACC_DTYPE, device=device)
+            self._sum_sq[name] = torch.zeros(d, dtype=_ACC_DTYPE, device=device)
+            self._counts[name] = 0
+            self._hooks.append(module.register_forward_hook(self._make_hook(name, d)))
         return self
 
     def _make_hook(self, name: str, in_features: int):

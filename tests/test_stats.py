@@ -98,10 +98,19 @@ def test_empty_calibration_raises(tiny_model, tokenizer):
         collect_domain(tiny_model, tokenizer, ["", "   "])
 
 
-def test_unused_linear_raises(tiny_model, tokenizer):
-    tiny_model.unused = torch.nn.Linear(16, 16)  # never runs in forward
+def test_unused_linear_in_text_tower_raises(tiny_model, tokenizer):
+    tiny_model.model.unused = torch.nn.Linear(16, 16)  # never runs in forward
     with pytest.raises(RuntimeError, match="never executed"):
         collect_domain(tiny_model, tokenizer, CALIB_LINES, n_samples=None)
+
+
+def test_linear_outside_text_tower_is_ignored(tiny_model, tokenizer):
+    # Stands in for a multimodal model's vision tower: attached to the wrapper,
+    # outside the decoder, and never executed on text.
+    tiny_model.vision = torch.nn.Linear(4, 4)
+    got = collect_domain(tiny_model, tokenizer, CALIB_LINES, n_samples=2)
+    assert "vision" not in got
+    assert "model.layers.0.self_attn.q_proj" in got
 
 
 def test_hooks_removed_on_exception(tiny_model, tokenizer):

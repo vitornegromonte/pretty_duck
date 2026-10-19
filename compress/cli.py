@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 from . import stats as stats_mod
 from . import serialize
@@ -30,8 +30,11 @@ DEFAULT_FORMATS = "fp16,int8,int4,nf4"
 
 def _safetensors_path(model_path: str) -> Path | None:
     """Single-file safetensors checkpoint (the streamed, low-RAM path)."""
-    p = Path(model_path) / "model.safetensors"
-    return p if p.exists() else None
+    for name in ("model.safetensors", "model.safetensors-00001-of-00001.safetensors"):
+        p = Path(model_path) / name
+        if p.exists():
+            return p
+    return None
 
 
 @contextmanager
@@ -93,7 +96,15 @@ def _load_model(path: str):
     # configuration is evaluated in the same dtype so comparisons stay fair.
     cuda = torch.cuda.is_available()
     dtype = torch.float16 if cuda else torch.bfloat16
-    model = AutoModelForCausalLM.from_pretrained(path, **{kwarg: dtype})
+    config = AutoConfig.from_pretrained(path)
+    if getattr(config, "vision_config", None) is not None:
+        # Multimodal checkpoints (e.g. Qwen3.5-Base) are not CausalLM classes:
+        # AutoModelForCausalLM would silently skip their text weights.
+        from transformers import AutoModelForImageTextToText
+
+        model = AutoModelForImageTextToText.from_pretrained(path, **{kwarg: dtype})
+    else:
+        model = AutoModelForCausalLM.from_pretrained(path, **{kwarg: dtype})
     if cuda:
         model = model.to("cuda")
     tokenizer = AutoTokenizer.from_pretrained(path)

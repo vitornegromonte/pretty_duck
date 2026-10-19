@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 import torch
 
@@ -125,3 +127,16 @@ def test_save_load_roundtrip(tmp_path, tiny_model, tokenizer):
     for name in domains["a"]:
         assert torch.equal(loaded["a"][name]["A"], domains["a"][name]["A"])
         assert loaded["a"][name]["count"] == domains["a"][name]["count"]
+
+
+def test_failed_save_leaves_no_stats_file(tmp_path, monkeypatch):
+    path = tmp_path / "stats.pt"
+
+    def no_space(self, data):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(Path, "write_bytes", no_space)
+    with pytest.raises(OSError, match="No space left"):
+        save_stats({}, path, meta={})
+    assert not path.exists()
+    assert list(tmp_path.iterdir()) == []  # temp file cleaned up too

@@ -22,6 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
 
 from compress.cli import main as cli
+from compress.stats import load_stats
 
 MODEL = sys.argv[1] if len(sys.argv) > 1 else "HuggingFaceTB/SmolLM-135M"
 OUT = Path("outputs") / MODEL.split("/")[-1].lower()
@@ -35,6 +36,15 @@ def run(*argv) -> float:
     t0 = time.perf_counter()
     cli([str(a) for a in argv])
     return time.perf_counter() - t0
+
+
+def stats_ready(path: Path) -> bool:
+    """An interrupted save can leave a truncated stats.pt; don't resume on it."""
+    try:
+        load_stats(path)
+    except Exception:
+        return False
+    return True
 
 
 def write_uniform_plans(est: dict, fp16_bytes: int) -> dict[str, Path]:
@@ -65,7 +75,7 @@ def main() -> None:
 
     timings: dict[str, float] = {}
     # Cheap resume: completed stages leave their artifact behind; skip them.
-    if not stats.exists():
+    if not stats_ready(stats):
         timings["collect_stats"] = run(
             "collect_stats", "--model-path", MODEL,
             "--calib", f"wealth={DATA / 'wealth_train.csv'}",

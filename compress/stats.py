@@ -14,6 +14,7 @@ Axis convention (kept everywhere downstream):
 
 from __future__ import annotations
 
+import io
 import random
 from pathlib import Path
 
@@ -171,7 +172,18 @@ def collect_domain(
 
 def save_stats(domains: dict[str, dict], path: str | Path, meta: dict) -> None:
     """Persist ``{domain: {layer: {A, V, count}}}`` plus collection metadata."""
-    torch.save({"meta": meta, "domains": domains}, Path(path))
+    # Serialise in memory: the zip writer seeks backwards, and some network
+    # filesystems fail that with "unexpected pos" / basic_ios errors.
+    buf = io.BytesIO()
+    torch.save({"meta": meta, "domains": domains}, buf)
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_bytes(buf.getvalue())
+        tmp.replace(path)  # atomic: a failed save never leaves a corrupt stats.pt
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def load_stats(path: str | Path) -> tuple[dict[str, dict], dict]:

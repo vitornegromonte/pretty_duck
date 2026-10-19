@@ -23,7 +23,7 @@ from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 from . import stats as stats_mod
 from . import serialize
 from .allocate import estimate_blocks, estimate_model_blocks, build_plan, load_plan, save_plan
-from .evaluate import evaluate_mc
+from .evaluate import PROMPT_STYLES, evaluate_mc
 
 DEFAULT_FORMATS = "fp16,int8,int4,nf4"
 
@@ -234,13 +234,14 @@ def cmd_evaluate_compression(args) -> dict:
     report = {
         "model": args.model_path,
         "dtype": str(next(model.parameters()).dtype),  # bf16 on CPU, fp16 on CUDA
+        "prompt_style": args.prompt_style,
         "compressed_dir": str(args.compressed_dir) if args.compressed_dir else None,
         "compressed_blocks": n,
         "model_param_bytes": sum(p.numel() * p.element_size() for p in model.parameters()),
         "results": {
             name: evaluate_mc(
                 model, tokenizer, path, negate=args.negate, sys_prompt=args.sys_prompt,
-                max_questions=args.max_questions,
+                max_questions=args.max_questions, prompt_style=args.prompt_style,
             )
             for name, path in tests.items()
         },
@@ -301,6 +302,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--test", action="append", default=[], metavar="NAME=FILE")
     p.add_argument("--negate", action="store_true")
     p.add_argument("--sys-prompt", default="")
+    p.add_argument("--prompt-style", choices=PROMPT_STYLES, default="auto")
     p.add_argument("--max-questions", type=int, default=None)
     p.add_argument("--out", required=True)
     p.set_defaults(func=cmd_evaluate_compression)

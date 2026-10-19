@@ -15,6 +15,7 @@ Target domain = wealth (Persona/data/wealth_*), secondary = honesty (h_*).
 """
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -29,6 +30,7 @@ OUT = Path("outputs") / MODEL.split("/")[-1].lower()
 DATA = Path("Persona/data")
 SIZE_FRACTION = 0.5  # heterogeneous runs target 50% of the fp16 Linear payload
 LAM = 0.5
+PROMPT_STYLE = os.environ.get("PROMPT_STYLE", "auto")  # plain for base checkpoints
 
 
 def run(*argv) -> float:
@@ -107,6 +109,7 @@ def main() -> None:
 
     configs: list[tuple[str, Path | None]] = [("baseline", None)] + list(plans.items())
     report: dict = {"model": MODEL, "target": "wealth", "secondary": "honesty",
+                    "prompt_style": PROMPT_STYLE,
                     "size_budget_bytes": size_budget, "fp16_linear_bytes": fp16_bytes,
                     "timings_s": timings, "configs": {}}
     for name, plan_path in configs:
@@ -114,6 +117,7 @@ def main() -> None:
         argv = ["evaluate_compression", "--model-path", MODEL,
                 "--test", f"wealth={DATA / 'wealth_test_infer.csv'}",
                 "--test", f"honesty={DATA / 'h_test_infer.csv'}",
+                "--prompt-style", PROMPT_STYLE,
                 "--out", OUT / f"report_{name}.json"]
         if plan_path is not None:
             timings[f"quantize_{name}"] = run(

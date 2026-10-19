@@ -36,6 +36,22 @@ def test_prompt_uses_tokenizer_chat_template():
     assert build_prompt("", "w1?", ChatTokenizer()) == "CHAT"
 
 
+def test_prompt_style_overrides_template():
+    class ChatTokenizer:
+        chat_template = "template"
+
+        def apply_chat_template(self, *args, **kwargs):
+            raise AssertionError("plain style must not use the template")
+
+    assert build_prompt("", "w1?", ChatTokenizer(), "plain") == "w1?"
+    assert build_prompt("", "w1?", style="llama2") == "[INST] w1? [/INST]"
+
+
+def test_chat_style_requires_a_template():
+    with pytest.raises(ValueError, match="chat template"):
+        build_prompt("", "w1?", tokenizer=None, style="chat")
+
+
 def test_option_logprob_is_finite(tiny_model, tokenizer):
     value = option_logprob(tiny_model, tokenizer, "", "w1 w2?", "w3 w4", "cpu")
     assert math.isfinite(value)

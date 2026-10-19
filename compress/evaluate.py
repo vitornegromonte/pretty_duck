@@ -15,14 +15,28 @@ import time
 
 import torch
 
-def build_prompt(system_prompt: str, user_prompt: str, tokenizer=None) -> str:
-    """Use the model's own chat template when it has one, else plain completion.
+PROMPT_STYLES = ("auto", "chat", "plain", "llama2")
 
-    The hard-coded Llama-2 ``[INST]`` wrapper from ``Persona/contra.py`` is
-    wrong for other families (e.g. Qwen), so prompts follow the tokenizer.
+
+def build_prompt(
+    system_prompt: str, user_prompt: str, tokenizer=None, style: str = "auto"
+) -> str:
+    """Wrap the question for the model.
+
+    ``auto`` uses the tokenizer's chat template when it has one and plain
+    completion otherwise.  Base checkpoints without SFT are better served by
+    ``plain``; ``llama2`` reproduces the original Persona/contra.py wrapper.
     """
+    if style not in PROMPT_STYLES:
+        raise ValueError(f"unknown prompt style {style!r}")
+    if style == "llama2":
+        if system_prompt:
+            return f"[INST] <<SYS>>\n{system_prompt}\n<</SYS>>\n\n{user_prompt} [/INST]"
+        return f"[INST] {user_prompt} [/INST]"
     template = getattr(tokenizer, "chat_template", None) if tokenizer is not None else None
-    if template:
+    if style == "chat" and not template:
+        raise ValueError("prompt style 'chat' needs a tokenizer with a chat template")
+    if style in ("auto", "chat") and template:
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -36,10 +50,11 @@ def build_prompt(system_prompt: str, user_prompt: str, tokenizer=None) -> str:
 
 
 def option_logprob(
-    model, tokenizer, system_prompt: str, question: str, option: str, device
+    model, tokenizer, system_prompt: str, question: str, option: str, device,
+    prompt_style: str = "auto",
 ) -> float:
     """Log-probability the model assigns to ``option`` given the question."""
-    prompt = build_prompt(system_prompt, f"{question}\n\nAnswer:", tokenizer)
+    prompt = build_prompt(system_prompt, f"{question}\n\nAnswer:", tokenizer, prompt_style)
     enc_prompt = tokenizer(prompt, return_tensors="pt").to(device)
     enc_full = tokenizer(prompt + " " + option, return_tensors="pt").to(device)
     input_ids = enc_full["input_ids"]
@@ -61,6 +76,7 @@ def evaluate_mc(
     negate: bool = False,
     sys_prompt: str = "",
     max_questions: int | None = None,
+    prompt_style: str = "auto",
 ) -> dict:
     """Evaluate one ``*_test_infer.csv`` file; returns a metrics dict.
 
@@ -82,8 +98,12 @@ def evaluate_mc(
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             t0 = time.perf_counter()
-            logp_a = option_logprob(model, tokenizer, sys_prompt, question, a, device)
-            logp_b = option_logprob(model, tokenizer, sys_prompt, question, b, device)
+            logp_a = option_logprob(
+                model, tokenizer, sys_prompt, question, a, device, prompt_style
+            )
+            logp_b = option_logprob(
+                model, tokenizer, sys_prompt, question, b, device, prompt_style
+            )
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             total_ms += (time.perf_counter() - t0) * 1000.0
@@ -97,6 +117,7 @@ def evaluate_mc(
         "test_file": str(test_file),
         "negate": negate,
         "sys_prompt": sys_prompt,
+        "prompt_style": prompt_style,
         "n": total,
         "correct": correct,
         "accuracy": 100.0 * correct / total,

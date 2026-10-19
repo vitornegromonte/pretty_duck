@@ -95,6 +95,11 @@ python experiments/run_smollm.py   # SmolLM-135M, wealth target, honesty seconda
 * Only `nn.Linear` weights are compressed; embeddings/norms reload from the
   base model at their original precision.  A `lm_head` tied to the embeddings
   is skipped: rewriting it would rewrite the embeddings too.
+* Multimodal checkpoints (e.g. Qwen3.5-Base) are evaluated on their text
+  tower only; the vision tower is neither collected nor compressed.
+* Prompts follow the tokenizer's chat template by default (`--prompt-style
+  auto`).  Use `plain` for base checkpoints that were never chat-tuned, or
+  `llama2` to reproduce the original Persona protocol.
 * The allocator accepts portable formats only (`fp16/int8/int4/nf4`);
   `bnb_nf4` can be used for uniform experiments via `estimate_quant_error`
   and direct quantization, but has no exact byte formula in the allocator.

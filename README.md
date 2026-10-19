@@ -45,6 +45,12 @@ python -m compress evaluate_compression \
     --test wealth=Persona/data/wealth_test_infer.csv \
     --test honesty=Persona/data/h_test_infer.csv \
     --out report.json
+
+# Four-way MMLU, scored by answer letter (NLL per token + per-question predictions).
+# First run caches the canonical 160 MB CSV tarball under .cache/mmlu.
+python -m compress evaluate_compression \
+    --model-path Qwen/Qwen3.5-0.8B --mmlu law=professional_law:test \
+    --out mmlu_report.json
 ```
 
 `--target` accepts any domain present in the stats file: the pipeline is

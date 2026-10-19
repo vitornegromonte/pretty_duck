@@ -15,6 +15,8 @@ import time
 
 import torch
 
+from .mmlu import LETTERS, load_mmlu
+
 PROMPT_STYLES = ("auto", "chat", "plain", "llama2")
 
 
@@ -49,11 +51,11 @@ def build_prompt(
     return user_prompt
 
 
-def option_logprob(
+def option_nll(
     model, tokenizer, system_prompt: str, question: str, option: str, device,
     prompt_style: str = "auto",
-) -> float:
-    """Log-probability the model assigns to ``option`` given the question."""
+) -> tuple[float, int]:
+    """Return ``(total NLL, answer token count)`` for ``option``."""
     prompt = build_prompt(system_prompt, f"{question}\n\nAnswer:", tokenizer, prompt_style)
     enc_prompt = tokenizer(prompt, return_tensors="pt").to(device)
     enc_full = tokenizer(prompt + " " + option, return_tensors="pt").to(device)
@@ -65,7 +67,17 @@ def option_logprob(
         raise ValueError(f"option {option!r} produced no answer tokens to score")
     with torch.no_grad():
         out = model(input_ids=input_ids, attention_mask=enc_full["attention_mask"], labels=labels)
-    return -float(out.loss.item()) * answer_len  # total NLL of answer tokens
+    return float(out.loss.item()) * answer_len, answer_len
+
+
+def option_logprob(
+    model, tokenizer, system_prompt: str, question: str, option: str, device,
+    prompt_style: str = "auto",
+) -> float:
+    """Log-probability the model assigns to ``option`` given the question."""
+    return -option_nll(
+        model, tokenizer, system_prompt, question, option, device, prompt_style
+    )[0]
 
 
 def evaluate_mc(
@@ -123,3 +135,101 @@ def evaluate_mc(
         "accuracy": 100.0 * correct / total,
         "avg_latency_ms": total_ms / total,
     }
+
+
+def format_mmlu_question(row: dict) -> str:
+    """Lay out an MMLU row with lettered choices, ready for an ``Answer:`` suffix."""
+    lines = [row["question"].strip()]
+    lines.extend(f"{letter}. {choice.strip()}" for letter, choice in zip(LETTERS, row["choices"]))
+    return "\n".join(lines)
+
+
+def evaluate_mmlu_rows(
+    model,
+    tokenizer,
+    rows: list[dict],
+    *,
+    sys_prompt: str = "",
+    max_questions: int | None = None,
+    prompt_style: str = "auto",
+) -> dict:
+    """Score four-way MMLU rows by letter; NLL is length-normalized.
+
+    Each row is ``{question, choices, answer}`` with ``answer`` an index into
+    ``choices``.  The option text is the letter, so accuracy matches the
+    standard MMLU protocol rather than comparing choice phrasing.
+    """
+    model.eval()
+    device = next(model.parameters()).device
+    correct = total = 0
+    total_ms = 0.0
+    nll_sum = 0.0
+    predictions = []
+    for row in rows:
+        if max_questions is not None and total >= max_questions:
+            break
+        question = format_mmlu_question(row)
+        expected = LETTERS[row["answer"]]
+
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        option_nlls = {}
+        for letter in LETTERS:
+            nll, n_tokens = option_nll(
+                model, tokenizer, sys_prompt, question, letter, device, prompt_style
+            )
+            option_nlls[letter] = nll / n_tokens
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        total_ms += (time.perf_counter() - t0) * 1000.0
+
+        predicted = min(option_nlls, key=option_nlls.get)
+        correct += int(predicted == expected)
+        nll_sum += option_nlls[expected]
+        predictions.append(
+            {
+                "expected": expected,
+                "predicted": predicted,
+                "nll": option_nlls[expected],
+                "option_nll": option_nlls,
+            }
+        )
+        total += 1
+
+    if total == 0:
+        raise ValueError("no MMLU questions evaluated")
+    return {
+        "sys_prompt": sys_prompt,
+        "prompt_style": prompt_style,
+        "n": total,
+        "correct": correct,
+        "accuracy": 100.0 * correct / total,
+        "nll_per_token": nll_sum / total,
+        "avg_latency_ms": total_ms / total,
+        "predictions": predictions,
+    }
+
+
+def evaluate_mmlu(
+    model,
+    tokenizer,
+    subject: str,
+    split: str = "test",
+    *,
+    sys_prompt: str = "",
+    max_questions: int | None = None,
+    prompt_style: str = "auto",
+    cache_dir=None,
+) -> dict:
+    """Load one MMLU subject/split and score it.  See ``load_mmlu`` for caching."""
+    rows = load_mmlu(subject, split, cache_dir)
+    result = evaluate_mmlu_rows(
+        model,
+        tokenizer,
+        rows,
+        sys_prompt=sys_prompt,
+        max_questions=max_questions,
+        prompt_style=prompt_style,
+    )
+    return {"dataset": "cais/mmlu", "subject": subject, "split": split, **result}

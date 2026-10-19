@@ -23,7 +23,7 @@ from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 from . import stats as stats_mod
 from . import serialize
 from .allocate import estimate_blocks, estimate_model_blocks, build_plan, load_plan, save_plan
-from .evaluate import PROMPT_STYLES, evaluate_mc
+from .evaluate import PROMPT_STYLES, evaluate_mc, evaluate_mmlu
 
 DEFAULT_FORMATS = "fp16,int8,int4,nf4"
 
@@ -80,6 +80,22 @@ def _parse_pairs(values: list[str], what: str) -> dict[str, str]:
         if name in out:
             raise SystemExit(f"--{what} {name!r} given more than once")
         out[name] = path
+    return out
+
+
+def _parse_mmlu(values: list[str]) -> dict[str, tuple[str, str]]:
+    """Parse repeated ``name=subject[:split]`` arguments into ``name -> (subject, split)``."""
+    out = {}
+    for v in values:
+        if "=" not in v:
+            raise SystemExit(f"--mmlu expects name=subject[:split], got {v!r}")
+        name, spec = v.split("=", 1)
+        subject, _, split = spec.partition(":")
+        if not subject:
+            raise SystemExit(f"--mmlu {name!r} has an empty subject")
+        if name in out:
+            raise SystemExit(f"--mmlu {name!r} given more than once")
+        out[name] = (subject, split or "test")
     return out
 
 
@@ -233,8 +249,24 @@ def cmd_evaluate_compression(args) -> dict:
     else:
         n, manifest = 0, None
     tests = _parse_pairs(args.test, "test")
-    if not tests:
-        raise SystemExit("provide at least one --test name=file.csv")
+    mmlu = _parse_mmlu(args.mmlu)
+    if not tests and not mmlu:
+        raise SystemExit("provide at least one --test name=file.csv or --mmlu name=subject[:split]")
+    if set(tests) & set(mmlu):
+        raise SystemExit(f"names given to both --test and --mmlu: {sorted(set(tests) & set(mmlu))}")
+    results = {
+        name: evaluate_mc(
+            model, tokenizer, path, negate=args.negate, sys_prompt=args.sys_prompt,
+            max_questions=args.max_questions, prompt_style=args.prompt_style,
+        )
+        for name, path in tests.items()
+    }
+    for name, (subject, split) in mmlu.items():
+        results[name] = evaluate_mmlu(
+            model, tokenizer, subject, split, sys_prompt=args.sys_prompt,
+            max_questions=args.max_questions, prompt_style=args.prompt_style,
+            cache_dir=args.mmlu_cache,
+        )
     report = {
         "model": args.model_path,
         "dtype": str(next(model.parameters()).dtype),  # bf16 on CPU, fp16 on CUDA
@@ -242,13 +274,7 @@ def cmd_evaluate_compression(args) -> dict:
         "compressed_dir": str(args.compressed_dir) if args.compressed_dir else None,
         "compressed_blocks": n,
         "model_param_bytes": sum(p.numel() * p.element_size() for p in model.parameters()),
-        "results": {
-            name: evaluate_mc(
-                model, tokenizer, path, negate=args.negate, sys_prompt=args.sys_prompt,
-                max_questions=args.max_questions, prompt_style=args.prompt_style,
-            )
-            for name, path in tests.items()
-        },
+        "results": results,
     }
     if manifest is not None:
         report["linear_fp16_reference_bytes"] = manifest["totals"]["fp16_reference_nbytes"]
@@ -304,6 +330,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model-path", required=True)
     p.add_argument("--compressed-dir", default=None)
     p.add_argument("--test", action="append", default=[], metavar="NAME=FILE")
+    p.add_argument("--mmlu", action="append", default=[], metavar="NAME=SUBJECT[:SPLIT]")
+    p.add_argument("--mmlu-cache", default=None)
     p.add_argument("--negate", action="store_true")
     p.add_argument("--sys-prompt", default="")
     p.add_argument("--prompt-style", choices=PROMPT_STYLES, default="auto")

@@ -27,7 +27,11 @@ MASK_KINDS = ("none", "contrast", "contrast_abs", "inverse", "magnitude", "wanda
 def contrast_scores(stats: dict, seek: str, reject: str) -> dict[str, torch.Tensor]:
     """Signed per-input-channel contrast ``z`` for every layer in both domains."""
     if seek not in stats or reject not in stats:
-        raise ValueError(f"stats has no domain {seek if seek not in stats else reject!r}")
+        missing = [name for name in (seek, reject) if name not in stats]
+        raise ValueError(
+            f"stats has no domain(s) {missing}; available: {sorted(stats)}. "
+            "Collect them with --calib math=... --calib law=..."
+        )
     missing = [name for name in stats[seek] if name not in stats[reject]]
     if missing:
         raise ValueError(f"domains were collected on different layers: {missing[:3]} ...")
@@ -78,14 +82,18 @@ def apply_domain_mask(
         raise ValueError(f"sparsity must be in [0, 1), got {sparsity}")
     if not seek or not reject:
         raise ValueError("masking requires both --mask-seek and --mask-reject domains")
+    missing = [name for name in (seek, reject) if name not in stats]
+    if missing:
+        raise ValueError(
+            f"stats has no domain(s) {missing}; available: {sorted(stats)}. "
+            "Collect them with --calib math=... --calib law=..."
+        )
 
     z = None
     if kind in ("contrast", "contrast_abs", "inverse"):
         z = contrast_scores(stats, seek, reject)
         names = list(z)
     else:
-        if seek not in stats:
-            raise ValueError(f"stats has no domain {seek!r}")
         names = list(stats[seek])
 
     modules = dict(model.named_modules())

@@ -90,6 +90,14 @@ def test_old_stats_without_signed_means_are_rejected(tiny_model):
         )
 
 
+def test_missing_domain_lists_the_available_ones(tiny_model):
+    stats = {"law": _stats(32, [1] * 32)["seek"]}
+    with pytest.raises(ValueError, match=r"available: \['law'\]"):
+        apply_domain_mask(
+            tiny_model, stats, kind="contrast", seek="math", reject="law"
+        )
+
+
 def test_sparsity_outside_half_open_range_is_rejected(tiny_model):
     with pytest.raises(ValueError, match="sparsity"):
         apply_domain_mask(

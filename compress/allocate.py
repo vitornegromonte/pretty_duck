@@ -29,6 +29,7 @@ import torch
 
 from .quant import PORTABLE_FORMATS, is_available, quantize_weight, quant_error, \
     diagonal_error, block_importance, storage_nbytes
+from .stats import tied_weight_ptrs
 
 
 def estimate_blocks(
@@ -78,10 +79,15 @@ def estimate_blocks(
 
 
 def estimate_model_blocks(model, domains_stats: dict[str, dict], formats: list[str]) -> dict[str, dict]:
-    """Convenience wrapper of :func:`estimate_blocks` for an in-memory model."""
+    """Convenience wrapper of :func:`estimate_blocks` for an in-memory model.
+
+    Tied weights (e.g. a tied ``lm_head``) are skipped, matching the stats
+    collector; they are not compressed independently.
+    """
+    tied = tied_weight_ptrs(model)
     linears = (
         (name, module.weight) for name, module in model.named_modules()
-        if isinstance(module, torch.nn.Linear)
+        if isinstance(module, torch.nn.Linear) and module.weight.data_ptr() not in tied
     )
     return estimate_blocks(linears, domains_stats, formats)
 

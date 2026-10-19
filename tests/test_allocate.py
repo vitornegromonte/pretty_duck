@@ -2,7 +2,16 @@ import json
 
 import pytest
 
-from compress.allocate import build_plan, load_plan, save_plan
+from compress.allocate import build_plan, estimate_model_blocks, load_plan, save_plan
+from compress.stats import collect_domain
+from tests.conftest import CALIB_LINES
+
+
+def test_estimate_model_blocks_skips_tied_lm_head(tiny_model, tokenizer):
+    stats = {"d": collect_domain(tiny_model, tokenizer, CALIB_LINES, n_samples=2)}
+    est = estimate_model_blocks(tiny_model, stats, ["fp16", "int8"])
+    assert "lm_head" not in est
+    assert set(est) == set(stats["d"])
 
 
 def _est(shape, errors_by_domain_fmt, importance_by_domain):

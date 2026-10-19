@@ -75,6 +75,22 @@ def test_bnb_nf4_payload_matches_analytic_formula(W):
     assert q.nbytes == storage_nbytes(tuple(W.shape), "bnb_nf4")
 
 
+def test_nf4_chunked_argmin_matches_a_single_pass():
+    """The row-chunked codebook comparison must equal the one-shot broadcast."""
+    torch.manual_seed(0)
+    W = torch.randn(80, 48) * 0.5  # 80 output rows -> more than one 64-row chunk
+    q = quantize_weight(W, "nf4")
+    nblk = (W.shape[1] + NF4_BLOCKSIZE - 1) // NF4_BLOCKSIZE
+    pad = nblk * NF4_BLOCKSIZE - W.shape[1]
+    w = torch.nn.functional.pad(W, (0, pad)).reshape(W.shape[0], nblk, NF4_BLOCKSIZE)
+    absmax = w.abs().amax(dim=-1)
+    scale = torch.where(absmax.half() > 0, absmax.half(), torch.ones_like(absmax)).float()
+    ref = (scale[..., None] * NF4_CODEBOOK[
+        ((w / scale[..., None]).unsqueeze(-1) - NF4_CODEBOOK).abs().argmin(-1)
+    ]).reshape(W.shape[0], nblk * NF4_BLOCKSIZE)[:, : W.shape[1]]
+    assert torch.equal(q.dequant, ref)
+
+
 def test_4bit_formats_are_actually_packed():
     W = torch.randn(4, 64)
     q = quantize_weight(W, "int4")

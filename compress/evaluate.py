@@ -11,7 +11,6 @@ evaluator works for any domain pair.
 from __future__ import annotations
 
 import csv
-import resource
 import time
 
 import torch
@@ -34,9 +33,11 @@ def option_logprob(
     input_ids = enc_full["input_ids"]
     labels = input_ids.clone()
     labels[:, : enc_prompt["input_ids"].shape[1]] = -100  # score answer only
+    answer_len = int((labels != -100).sum().item())
+    if answer_len == 0:
+        raise ValueError(f"option {option!r} produced no answer tokens to score")
     with torch.no_grad():
         out = model(input_ids=input_ids, attention_mask=enc_full["attention_mask"], labels=labels)
-    answer_len = max(1, int((labels != -100).sum().item()))
     return -float(out.loss.item()) * answer_len  # total NLL of answer tokens
 
 
@@ -88,6 +89,4 @@ def evaluate_mc(
         "correct": correct,
         "accuracy": 100.0 * correct / total,
         "avg_latency_ms": total_ms / total,
-        # ru_maxrss is KiB on Linux.
-        "peak_rss_mb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0,
     }

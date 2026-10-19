@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import torch
@@ -33,31 +34,37 @@ def _safetensors_path(model_path: str) -> Path | None:
     return p if p.exists() else None
 
 
-def _weight_from_safetensors(path: Path, name: str):
-    """Read one Linear weight from a single-file checkpoint.
+@contextmanager
+def _open_safetensors(path: Path):
+    """Open a checkpoint once: safe_open re-reads the header on every call."""
+    from safetensors import safe_open
+
+    with safe_open(str(path), framework="pt") as f:
+        yield f, set(f.keys())
+
+
+def _weight_from(handle, keys: set[str], name: str):
+    """Read one Linear weight from an open checkpoint.
 
     Falls back to the embedding matrix for ``lm_head`` when embeddings are
     tied and the head is therefore not stored separately.
     """
-    from safetensors import safe_open
-
-    with safe_open(str(path), framework="pt") as f:
-        keys = set(f.keys())
-        key = f"{name}.weight"
-        if key in keys:
-            return f.get_tensor(key)
-        if name == "lm_head" and "model.embed_tokens.weight" in keys:
-            return f.get_tensor("model.embed_tokens.weight")
-        raise KeyError(key)
+    key = f"{name}.weight"
+    if key in keys:
+        return handle.get_tensor(key)
+    if name == "lm_head" and "model.embed_tokens.weight" in keys:
+        return handle.get_tensor("model.embed_tokens.weight")
+    raise KeyError(key)
 
 
 def _stream_weights(path: Path, layer_names):
     """Yield ``(name, weight)`` for the requested layers, one tensor at a time.
 
-    Only one weight matrix is resident at any moment (per-call file open).
+    Only one weight matrix is resident at any moment.
     """
-    for name in sorted(layer_names):
-        yield name, _weight_from_safetensors(path, name)
+    with _open_safetensors(path) as (f, keys):
+        for name in sorted(layer_names):
+            yield name, _weight_from(f, keys, name)
 
 
 def _parse_pairs(values: list[str], what: str) -> dict[str, str]:
@@ -67,8 +74,14 @@ def _parse_pairs(values: list[str], what: str) -> dict[str, str]:
         if "=" not in v:
             raise SystemExit(f"--{what} expects name=path, got {v!r}")
         name, path = v.split("=", 1)
+        if name in out:
+            raise SystemExit(f"--{what} {name!r} given more than once")
         out[name] = path
     return out
+
+
+def _parse_formats(value: str) -> list[str]:
+    return [f.strip() for f in value.split(",") if f.strip()]
 
 
 def _load_model(path: str):
@@ -78,8 +91,11 @@ def _load_model(path: str):
     kwarg = "dtype" if int(transformers.__version__.split(".")[0]) >= 5 else "torch_dtype"
     # CPU runs use bf16: half the resident memory of fp32, and every compared
     # configuration is evaluated in the same dtype so comparisons stay fair.
-    dtype = torch.float16 if torch.cuda.is_available() else torch.bfloat16
+    cuda = torch.cuda.is_available()
+    dtype = torch.float16 if cuda else torch.bfloat16
     model = AutoModelForCausalLM.from_pretrained(path, **{kwarg: dtype})
+    if cuda:
+        model = model.to("cuda")
     tokenizer = AutoTokenizer.from_pretrained(path)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -111,7 +127,7 @@ def cmd_collect_stats(args) -> dict:
 
 def cmd_estimate_quant_error(args) -> dict:
     domains, meta = stats_mod.load_stats(args.stats)
-    formats = [f for f in args.formats.split(",") if f]
+    formats = _parse_formats(args.formats)
     names = sorted(next(iter(domains.values())))
 
     estimates, source = None, "model-load"
@@ -143,7 +159,7 @@ def cmd_allocate_bits(args) -> dict:
     estimates = blob["layers"]
     for e in estimates.values():
         e["shape"] = tuple(e["shape"])
-    formats = [f for f in args.formats.split(",") if f]
+    formats = _parse_formats(args.formats)
     plan = build_plan(
         estimates,
         target=args.target,
@@ -174,9 +190,10 @@ def cmd_quantize_model(args) -> dict:
     st = _safetensors_path(args.model_path)
     if st is not None:
         try:  # low-RAM path: quantize straight from the memory-mapped checkpoint
-            manifest = serialize.save_compressed_streamed(
-                lambda name: _weight_from_safetensors(st, name), plan, args.out_dir
-            )
+            with _open_safetensors(st) as (f, keys):
+                manifest = serialize.save_compressed_streamed(
+                    lambda name: _weight_from(f, keys, name), plan, args.out_dir
+                )
             source = "safetensors"
         except KeyError:
             manifest = None

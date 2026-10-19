@@ -4,6 +4,6 @@
 torch
 transformers>=4.46
 pytest
-# Optional: bitsandbytes NF4 backend (bnb_nf4 format). The functional API
-# works on CPU; the nn.Module layers require CUDA.
-bitsandbytes
+# Optional extra, not installed by default. Needed only for the bnb_nf4
+# format; the functional API works on CPU, its nn.Module layers need CUDA.
+#   uv pip install --python .venv/bin/python bitsandbytes

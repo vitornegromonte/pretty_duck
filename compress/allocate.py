@@ -139,12 +139,22 @@ def build_plan(
             raise KeyError(f"secondary domain {d!r} not in estimates")
 
     # Normalized contrastive importance in [0, 1]; used only by signal="contrastive".
-    contrast = _normalized_contrast(estimates, target, secondary, lam)
+    contrast = (
+        _normalized_contrast(estimates, target, secondary, lam)
+        if signal == "contrastive" else {}
+    )
 
     state = {name: "fp16" for name in estimates}
     used_bytes = sum(e["nbytes"]["fp16"] for e in estimates.values())
     total_fp16_bytes = used_bytes
-    est_error = 0.0
+    # fp16 is not error-free: start from its measured baseline so the reported
+    # total is sum(error at the chosen formats), not the sum of the deltas.
+    est_error = sum(e["error"][target]["fp16"] for e in estimates.values())
+    if error_budget is not None and est_error > error_budget:
+        raise ValueError(
+            f"error budget {error_budget} unreachable: the fp16 baseline error "
+            f"is already {est_error}"
+        )
     decisions: list[dict] = []
 
     while True:

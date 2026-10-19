@@ -15,3 +15,8 @@ runs/
 # Hugging Face cache
 .cache/
 outputs_run.log
+
+graphify*/
+TASK.md
+REQ.md
+ARCHITECTURE.md

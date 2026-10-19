@@ -16,6 +16,7 @@ from pathlib import Path
 import torch
 
 from .quant import quantize_weight, dequantize_weight, storage_nbytes
+from .stats import tied_weight_ptrs
 
 
 def save_compressed(
@@ -78,6 +79,13 @@ def save_compressed_streamed(
         manifest["totals"]["file_nbytes"] += file_nbytes
         manifest["totals"]["fp16_reference_nbytes"] += W.numel() * 2
 
+    # Blocks a previous plan wrote but this one does not are still counted by
+    # measure_bytes; drop them once the new ones are safely on disk.
+    written = {tensors_dir / f"{name}.pt" for name in manifest["blocks"]}
+    for stale in tensors_dir.glob("*.pt"):
+        if stale not in written:
+            stale.unlink()
+
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=1, sort_keys=True))
     return manifest
 
@@ -85,7 +93,11 @@ def save_compressed_streamed(
 def load_block(manifest: dict, out_dir: str | Path, name: str) -> torch.Tensor:
     """Read one stored block and reconstruct its float32 weight."""
     info = manifest["blocks"][name]
-    payload = torch.load(Path(out_dir) / info["file"], map_location="cpu", weights_only=False)
+    # bnb_nf4 stores a pickled bitsandbytes QuantState, which weights_only rejects.
+    payload = torch.load(
+        Path(out_dir) / info["file"], map_location="cpu",
+        weights_only=info["format"] != "bnb_nf4",
+    )
     return dequantize_weight(
         payload["codes"], payload.get("scale", payload.get("state")), payload["format"],
         tuple(payload["shape"]),
@@ -101,8 +113,12 @@ def apply_to_model(model: torch.nn.Module, out_dir: str | Path) -> int:
     out_dir = Path(out_dir)
     manifest = json.loads((out_dir / "manifest.json").read_text())
     named = dict(model.named_modules())
+    tied = tied_weight_ptrs(model)  # e.g. a lm_head tied to the embeddings
+    applied = 0
     for name in manifest["blocks"]:
         module = named[name]
+        if module.weight.data_ptr() in tied:
+            continue  # storing it would rewrite the tied module as well
         weight = load_block(manifest, out_dir, name)
         if tuple(weight.shape) != tuple(module.weight.shape):
             raise ValueError(
@@ -110,7 +126,8 @@ def apply_to_model(model: torch.nn.Module, out_dir: str | Path) -> int:
                 f"model {tuple(module.weight.shape)}"
             )
         module.weight.data.copy_(weight.to(module.weight.device))
-    return len(manifest["blocks"])
+        applied += 1
+    return applied
 
 
 def measure_bytes(out_dir: str | Path) -> int:

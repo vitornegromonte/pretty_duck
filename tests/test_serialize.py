@@ -4,6 +4,7 @@ import torch
 from compress import serialize
 from compress.allocate import load_plan, save_plan
 from compress.quant import quantize_weight
+from compress.stats import tied_weight_ptrs
 
 
 def _full_plan(model, fmt="int4"):
@@ -47,16 +48,32 @@ def test_manifest_records_actual_file_sizes(tiny_model, tmp_path):
 
 def test_apply_to_model_mutates_weights_and_counts(tiny_model, tmp_path):
     out = tmp_path / "c"
-    plan = _full_plan(tiny_model, "nf4")
+    plan = _full_plan(tiny_model, "nf4")  # includes the tied lm_head
     serialize.save_compressed(tiny_model, plan, out)
-    linears = {n: m for n, m in tiny_model.named_modules() if isinstance(m, torch.nn.Linear)}
+    tied = tied_weight_ptrs(tiny_model)
+    linears = {
+        n: m for n, m in tiny_model.named_modules()
+        if isinstance(m, torch.nn.Linear) and m.weight.data_ptr() not in tied
+    }
     before = {n: m.weight.detach().clone() for n, m in linears.items()}
+    embeddings = tiny_model.model.embed_tokens.weight.detach().clone()
     n = serialize.apply_to_model(tiny_model, out)
     assert n == len(linears)
     for name, module in linears.items():
         assert not torch.equal(module.weight, before[name])  # weights replaced
         expected = quantize_weight(before[name], "nf4").dequant
         assert torch.allclose(module.weight.cpu(), expected, atol=1e-6)
+    # the tied lm_head in the plan must not leak into the embedding matrix
+    assert torch.equal(tiny_model.model.embed_tokens.weight, embeddings)
+
+
+def test_save_removes_stale_block_files(tiny_model, tmp_path):
+    out = tmp_path / "c"
+    serialize.save_compressed(tiny_model, _full_plan(tiny_model, "int8"), out)
+    stale = out / "tensors" / "a_block_no_longer_planned.pt"
+    stale.write_bytes(b"left over from an earlier plan")
+    serialize.save_compressed(tiny_model, _full_plan(tiny_model, "int4"), out)
+    assert not stale.exists()  # measure_bytes must not count it either
 
 
 def test_plan_roundtrip_on_disk(tmp_path):

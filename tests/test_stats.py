@@ -1,7 +1,13 @@
 import pytest
 import torch
 
-from compress.stats import ActivationCollector, collect_domain, load_stats, save_stats
+from compress.stats import (
+    ActivationCollector,
+    collect_domain,
+    load_stats,
+    save_stats,
+    tied_weight_ptrs,
+)
 from tests.conftest import CALIB_LINES
 
 
@@ -9,6 +15,7 @@ def _manual_moments(model, tokenizer, lines, max_len=16):
     """Reference implementation: single-line batches, explicit masking."""
     sums, sqs, counts = {}, {}, {}
     hooks = []
+    tied = tied_weight_ptrs(model)
 
     def make_hook(name, d):
         def hook(module, inputs, output):
@@ -19,7 +26,7 @@ def _manual_moments(model, tokenizer, lines, max_len=16):
         return hook
 
     for name, module in model.named_modules():
-        if isinstance(module, torch.nn.Linear):
+        if isinstance(module, torch.nn.Linear) and module.weight.data_ptr() not in tied:
             hooks.append(module.register_forward_hook(make_hook(name, module.in_features)))
     with torch.no_grad():
         for line in lines:
@@ -58,6 +65,15 @@ def test_padding_positions_are_excluded(tiny_model, tokenizer):
         assert got[name]["count"] == int(enc["attention_mask"].sum())  # pads not counted
         assert torch.allclose(got[name]["A"], short[name]["A"], atol=1e-10)
         assert torch.allclose(got[name]["V"], short[name]["V"], atol=1e-10)
+
+
+def test_tied_lm_head_is_not_collected(tiny_model, tokenizer):
+    """The head shares storage with the embeddings, so it is not our target."""
+    assert tiny_model.lm_head.weight.data_ptr() == (
+        tiny_model.model.embed_tokens.weight.data_ptr()
+    )
+    got = collect_domain(tiny_model, tokenizer, CALIB_LINES, n_samples=None)
+    assert "lm_head" not in got
 
 
 def test_weights_are_not_modified(tiny_model, tokenizer):

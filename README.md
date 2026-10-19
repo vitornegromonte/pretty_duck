@@ -71,8 +71,8 @@ python experiments/run_smollm.py   # SmolLM-135M, wealth target, honesty seconda
 ## What is measured vs estimated (read before quoting numbers)
 
 * **Measured**: file sizes on disk (`compressed_tensor_bytes`,
-  `compressed_dir_bytes`), evaluation accuracy, per-question latency, peak
-  RSS, wall-clock times.
+  `compressed_dir_bytes`), evaluation accuracy, per-question latency,
+  wall-clock times.
 * **Estimated (local, diagonal)**: `D_{g,d}(b) = sum_ij E_ij^2 V_j` — ignores
   cross-channel correlation; a prioritization signal, not a predicted final
   loss.
@@ -93,7 +93,8 @@ python experiments/run_smollm.py   # SmolLM-135M, wealth target, honesty seconda
   on CPU** (half the RAM of fp32; recorded as `dtype` in every report, and
   identical across compared configurations).
 * Only `nn.Linear` weights are compressed; embeddings/norms reload from the
-  base model at their original precision.
+  base model at their original precision.  A `lm_head` tied to the embeddings
+  is skipped: rewriting it would rewrite the embeddings too.
 * The allocator accepts portable formats only (`fp16/int8/int4/nf4`);
   `bnb_nf4` can be used for uniform experiments via `estimate_quant_error`
   and direct quantization, but has no exact byte formula in the allocator.
@@ -135,5 +136,5 @@ resume: each stage is skipped when its artifact already exists under
 ## Tests
 
 ```bash
-python -m pytest tests/ -q    # 44 tests, offline, CPU, < 3 GB RAM
+python -m pytest tests/ -q    # offline, CPU, < 3 GB RAM
 ```

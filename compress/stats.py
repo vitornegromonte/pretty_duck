@@ -24,6 +24,21 @@ import torch
 _ACC_DTYPE = torch.float64  # accumulate in double to avoid long-sum rounding
 
 
+def tied_weight_ptrs(model: torch.nn.Module) -> set[int]:
+    """data_ptrs of weights two modules share, e.g. a tied lm_head/embedding.
+
+    Such a weight cannot be compressed on its own: rewriting it rewrites the
+    other module too, which is what the split between compressed Linears and
+    untied embeddings promises not to do.
+    """
+    seen: dict[int, int] = {}
+    for _, module in model.named_modules():
+        weight = getattr(module, "weight", None)
+        if isinstance(weight, torch.Tensor):
+            seen[weight.data_ptr()] = seen.get(weight.data_ptr(), 0) + 1
+    return {ptr for ptr, n in seen.items() if n > 1}
+
+
 class ActivationCollector:
     """Forward-hook collector for per-channel activation moments.
 
@@ -52,11 +67,13 @@ class ActivationCollector:
         self._mask = attention_mask
 
     def __enter__(self) -> "ActivationCollector":
+        tied = tied_weight_ptrs(self.model)
+        device = next(self.model.parameters()).device
         for name, module in self.model.named_modules():
-            if isinstance(module, torch.nn.Linear):
+            if isinstance(module, torch.nn.Linear) and module.weight.data_ptr() not in tied:
                 d = module.in_features
-                self._sum_abs[name] = torch.zeros(d, dtype=_ACC_DTYPE)
-                self._sum_sq[name] = torch.zeros(d, dtype=_ACC_DTYPE)
+                self._sum_abs[name] = torch.zeros(d, dtype=_ACC_DTYPE, device=device)
+                self._sum_sq[name] = torch.zeros(d, dtype=_ACC_DTYPE, device=device)
                 self._counts[name] = 0
                 self._hooks.append(
                     module.register_forward_hook(self._make_hook(name, d))
@@ -80,8 +97,8 @@ class ActivationCollector:
             if flat.numel() == 0:
                 return  # batch that is entirely padding
             flat = flat.to(_ACC_DTYPE)
-            self._sum_abs[name] += flat.abs().sum(dim=0).cpu()
-            self._sum_sq[name] += flat.square().sum(dim=0).cpu()
+            self._sum_abs[name] += flat.abs().sum(dim=0)
+            self._sum_sq[name] += flat.square().sum(dim=0)
             self._counts[name] += flat.shape[0]
 
         return hook
@@ -101,8 +118,8 @@ class ActivationCollector:
     def layers(self) -> dict[str, dict]:
         return {
             name: {
-                "A": self._sum_abs[name] / self._counts[name],
-                "V": self._sum_sq[name] / self._counts[name],
+                "A": (self._sum_abs[name] / self._counts[name]).cpu(),
+                "V": (self._sum_sq[name] / self._counts[name]).cpu(),
                 "count": self._counts[name],
             }
             for name in self._counts

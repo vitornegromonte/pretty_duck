@@ -54,6 +54,8 @@ Both scripts are standalone CLIs with argparse subcommands (no package, no tests
   - honesty pair: `h_train.csv` / `h_test.csv` / `h_test_infer.csv`
   - wealth pair: `wealth_train.csv` / `wealth_test.csv` / `wealth_test_infer.csv`
   - `train.csv` / `test(1).csv` / `test_mc.csv`: a third, MBTI-ish set
+    (`compress/` only ever reads the `*_train.csv` and `*_test_infer.csv`
+    files; the rest are kept as the original Persona data)
 
 ## What the original actually applies to the model
 

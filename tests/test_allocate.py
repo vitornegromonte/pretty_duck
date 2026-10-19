@@ -121,6 +121,19 @@ def test_plan_is_deterministic_and_serializable(tmp_path):
     json.loads(path.read_text())  # valid JSON on disk
 
 
+def test_error_budget_includes_the_fp16_baseline():
+    est = _two_block_estimates()
+    for e in est.values():
+        e["error"]["T"]["fp16"] = 0.001  # fp16 is never free
+    baseline = sum(e["error"]["T"]["fp16"] for e in est.values())
+    # A budget below what fp16 already costs cannot be met.
+    with pytest.raises(ValueError, match="unreachable"):
+        build_plan(est, target="T", formats=["fp16", "int8", "int4"], error_budget=0.0005)
+    plan = build_plan(est, target="T", formats=["fp16", "int8", "int4"],
+                      error_budget=baseline + 0.001)
+    assert plan["totals"]["estimated_error_target"] == pytest.approx(baseline)
+
+
 def test_decisions_record_each_step():
     plan = build_plan(_two_block_estimates(), target="T", formats=["fp16", "int8", "int4"],
                       error_budget=1e12)

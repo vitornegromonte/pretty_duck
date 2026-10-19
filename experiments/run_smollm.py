@@ -118,7 +118,6 @@ def main() -> None:
             "acc_wealth": run_report["results"]["wealth"]["accuracy"],
             "acc_honesty": run_report["results"]["honesty"]["accuracy"],
             "avg_latency_ms_wealth": run_report["results"]["wealth"]["avg_latency_ms"],
-            "peak_rss_mb": run_report["results"]["wealth"]["peak_rss_mb"],
             "compressed_tensor_bytes": run_report.get("compressed_tensor_bytes"),
             "compressed_dir_bytes": run_report.get("compressed_dir_bytes"),
             "compression_ratio_vs_fp16_linears": run_report.get("compression_ratio_vs_fp16_linears"),

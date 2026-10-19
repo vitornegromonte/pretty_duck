@@ -36,7 +36,11 @@ def tiny_model(tokenizer) -> LlamaForCausalLM:
         num_hidden_layers=2, num_attention_heads=2, num_key_value_heads=2,
         pad_token_id=VOCAB_SIZE - 1,
     )
-    return LlamaForCausalLM(config).eval()
+    model = LlamaForCausalLM(config)
+    # Tie the head to the embeddings, as SmolLM / Llama-3 checkpoints do, so the
+    # suite exercises the case where rewriting one would rewrite the other.
+    model.lm_head.weight = model.model.embed_tokens.weight
+    return model.eval()
 
 
 CALIB_LINES = [

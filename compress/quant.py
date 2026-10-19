@@ -174,7 +174,14 @@ def _quantize_nf4_portable(W: torch.Tensor) -> QuantizedTensor:
     scale = torch.where(scale > 0, scale, torch.ones_like(scale)).float()
     norm = w / scale[..., None]
     cb = NF4_CODEBOOK.to(W.device)
-    codes = (norm.unsqueeze(-1) - cb).abs().argmin(dim=-1).to(torch.uint8)
+    # Compare in output-row chunks: the full (out, blocks, 64, 16) broadcast
+    # would cost 16x the weight in memory on large layers.
+    codes = torch.empty_like(norm, dtype=torch.uint8)
+    for start in range(0, out, 64):
+        stop = min(start + 64, out)
+        codes[start:stop] = (
+            norm[start:stop].unsqueeze(-1) - cb
+        ).abs().argmin(dim=-1).to(torch.uint8)
     packed = _pack_nibbles(codes)
     dequant = (scale[..., None] * cb[codes.long()]).reshape(out, nblk * NF4_BLOCKSIZE)[:, :inc]
     nbytes = packed.numel() + scale.numel() * _SCALE_BYTES

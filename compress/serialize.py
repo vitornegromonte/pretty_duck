@@ -125,7 +125,9 @@ def apply_to_model(model: torch.nn.Module, out_dir: str | Path) -> int:
                 f"shape mismatch for {name}: stored {tuple(weight.shape)} vs "
                 f"model {tuple(module.weight.shape)}"
             )
-        module.weight.data.copy_(weight.to(module.weight.device))
+        # copy_ casts and moves CPU->GPU without a full-size GPU temporary,
+        # which matters for an untied lm_head on a large model.
+        module.weight.data.copy_(weight)
         applied += 1
     return applied
 

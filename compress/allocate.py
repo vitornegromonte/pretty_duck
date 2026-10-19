@@ -57,18 +57,23 @@ def estimate_blocks(
         if weight.dim() != 2:
             raise ValueError(f"{name}: expected a 2-D Linear weight, got {weight.dim()}-D")
         W = weight.detach().float()
+        # Stats are stored on CPU; a model loaded on GPU would otherwise mix
+        # devices in diagonal_error/block_importance.
+        moments = {
+            domain: (dstats[name]["A"].to(W.device), dstats[name]["V"].to(W.device))
+            for domain, dstats in domains_stats.items()
+        }
         errors = {d: {} for d in domains_stats}
         for fmt in formats:  # quantize once per format, reuse across domains
             q = quantize_weight(W, fmt)
             E = quant_error(W, q)
-            for domain, dstats in domains_stats.items():
-                errors[domain][fmt] = diagonal_error(E, dstats[name]["V"])
+            for domain, (_, V) in moments.items():
+                errors[domain][fmt] = diagonal_error(E, V)
         estimates[name] = {
             "shape": tuple(W.shape),
             "nbytes": {fmt: storage_nbytes(tuple(W.shape), fmt) for fmt in formats},
             "importance": {
-                domain: block_importance(W, dstats[name]["A"])
-                for domain, dstats in domains_stats.items()
+                domain: block_importance(W, A) for domain, (A, _) in moments.items()
             },
             "error": errors,
         }

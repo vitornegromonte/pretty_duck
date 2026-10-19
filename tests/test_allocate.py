@@ -1,6 +1,7 @@
 import json
 
 import pytest
+import torch
 
 from compress.allocate import build_plan, estimate_model_blocks, load_plan, save_plan
 from compress.stats import collect_domain
@@ -12,6 +13,15 @@ def test_estimate_model_blocks_skips_tied_lm_head(tiny_model, tokenizer):
     est = estimate_model_blocks(tiny_model, stats, ["fp16", "int8"])
     assert "lm_head" not in est
     assert set(est) == set(stats["d"])
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+def test_estimate_model_blocks_handles_gpu_weights_with_cpu_stats(tiny_model, tokenizer):
+    stats = {"d": collect_domain(tiny_model, tokenizer, CALIB_LINES, n_samples=2)}
+    assert stats["d"]["model.layers.0.self_attn.q_proj"]["V"].device.type == "cpu"
+    tiny_model.to("cuda")
+    est = estimate_model_blocks(tiny_model, stats, ["fp16", "int8"])
+    assert est and all(e["error"]["d"]["int8"] >= 0 for e in est.values())
 
 
 def _est(shape, errors_by_domain_fmt, importance_by_domain):

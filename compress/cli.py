@@ -103,6 +103,10 @@ def _load_model(path: str):
         from transformers import AutoModelForImageTextToText
 
         model = AutoModelForImageTextToText.from_pretrained(path, **{kwarg: dtype})
+        # Text-only pipeline: the vision tower is never used and costs 1-2 GB
+        # of VRAM (which the 9B model needs during quantization).
+        if hasattr(model.model, "visual"):
+            del model.model.visual
     else:
         model = AutoModelForCausalLM.from_pretrained(path, **{kwarg: dtype})
     if cuda:

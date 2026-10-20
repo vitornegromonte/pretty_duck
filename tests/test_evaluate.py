@@ -5,6 +5,7 @@ import math
 import pytest
 
 from compress.evaluate import (
+    batch_option_nll,
     build_prompt,
     evaluate_mmlu_rows,
     format_mmlu_question,
@@ -75,6 +76,18 @@ def test_option_nll_returns_answer_token_count(tiny_model, tokenizer):
     nll, n_tokens = option_nll(tiny_model, tokenizer, "", "w1 w2?", "w3 w4", "cpu")
     assert math.isfinite(nll) and n_tokens > 0
     assert option_logprob(tiny_model, tokenizer, "", "w1 w2?", "w3 w4", "cpu") == -nll
+
+
+def test_batched_options_match_separate_forwards(tiny_model, tokenizer):
+    options = ["w3", "w3 w4", "w5", "w1 w2 w3"]
+    batched = batch_option_nll(tiny_model, tokenizer, "", "w1 w2?", options, "cpu")
+    separate = [
+        option_nll(tiny_model, tokenizer, "", "w1 w2?", option, "cpu")
+        for option in options
+    ]
+    for (b_nll, b_tokens), (s_nll, s_tokens) in zip(batched, separate):
+        assert b_tokens == s_tokens
+        assert b_nll == pytest.approx(s_nll, rel=1e-6, abs=1e-6)
 
 
 def test_mmlu_question_lists_four_lettered_choices():

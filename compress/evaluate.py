@@ -11,6 +11,7 @@ when it has one, so the evaluator works across model families.
 from __future__ import annotations
 
 import csv
+import sys
 import time
 
 import torch
@@ -68,6 +69,51 @@ def option_nll(
     with torch.no_grad():
         out = model(input_ids=input_ids, attention_mask=enc_full["attention_mask"], labels=labels)
     return float(out.loss.item()) * answer_len, answer_len
+
+
+def batch_option_nll(
+    model, tokenizer, system_prompt: str, question: str, options: list[str], device,
+    prompt_style: str = "auto",
+) -> list[tuple[float, int]]:
+    """Score several options in one forward; same answer-only masking as ``option_nll``.
+
+    The options share one prompt, so batching them amortizes the prompt pass.
+    Padding is ignored per sample, and the returned ``(total NLL, n_tokens)``
+    pairs match what separate ``option_nll`` calls would return.
+    """
+    prompt = build_prompt(system_prompt, f"{question}\n\nAnswer:", tokenizer, prompt_style)
+    prompt_ids = tokenizer(prompt, return_tensors="pt")["input_ids"][0]
+    n_prompt = prompt_ids.shape[0]
+    enc = tokenizer(
+        [prompt + " " + option for option in options],
+        return_tensors="pt",
+        padding=True,
+    ).to(device)
+    with torch.no_grad():
+        logits = model(input_ids=enc["input_ids"], attention_mask=enc["attention_mask"]).logits
+
+    result = []
+    for i, option in enumerate(options):
+        ids = enc["input_ids"][i].cpu()
+        mask = enc["attention_mask"][i].bool().cpu()
+        nonzero = mask.nonzero(as_tuple=False).flatten()
+        start, end = int(nonzero[0]), int(nonzero[-1]) + 1
+        if not torch.equal(ids[start : start + n_prompt], prompt_ids):
+            raise ValueError(
+                f"option {option!r}: prompt tokenization is not a prefix of the full string"
+            )
+        answer_start = start + n_prompt
+        n_tokens = end - answer_start
+        if n_tokens <= 0:
+            raise ValueError(f"option {option!r} produced no answer tokens to score")
+        # Causal LM: the logit at position p-1 predicts token p.
+        answer_logits = logits[i, answer_start - 1 : end - 1].float()
+        targets = ids[answer_start:end].to(answer_logits.device)
+        nll = torch.logsumexp(answer_logits, dim=-1) - answer_logits.gather(
+            -1, targets.unsqueeze(-1)
+        ).squeeze(-1)
+        result.append((float(nll.sum().item()), int(n_tokens)))
+    return result
 
 
 def option_logprob(
@@ -165,6 +211,8 @@ def evaluate_mmlu_rows(
     total_ms = 0.0
     nll_sum = 0.0
     predictions = []
+    n_planned = len(rows) if max_questions is None else min(len(rows), max_questions)
+    print(f"scoring {n_planned} MMLU questions...", file=sys.stderr, flush=True)
     for row in rows:
         if max_questions is not None and total >= max_questions:
             break
@@ -174,12 +222,13 @@ def evaluate_mmlu_rows(
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         t0 = time.perf_counter()
-        option_nlls = {}
-        for letter in LETTERS:
-            nll, n_tokens = option_nll(
-                model, tokenizer, sys_prompt, question, letter, device, prompt_style
-            )
-            option_nlls[letter] = nll / n_tokens
+        scored = batch_option_nll(
+            model, tokenizer, sys_prompt, question, list(LETTERS), device, prompt_style
+        )
+        option_nlls = {
+            letter: nll / n_tokens
+            for letter, (nll, n_tokens) in zip(LETTERS, scored)
+        }
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         total_ms += (time.perf_counter() - t0) * 1000.0
@@ -196,6 +245,13 @@ def evaluate_mmlu_rows(
             }
         )
         total += 1
+        if total % 25 == 0:
+            print(
+                f"  {total}/{n_planned} accuracy={100.0 * correct / total:.1f}% "
+                f"nll={nll_sum / total:.3f}",
+                file=sys.stderr,
+                flush=True,
+            )
 
     if total == 0:
         raise ValueError("no MMLU questions evaluated")

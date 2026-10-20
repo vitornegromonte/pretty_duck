@@ -48,16 +48,19 @@ python -m compress evaluate_compression \
 
 # Four-way MMLU, scored by answer letter (NLL per token + per-question predictions).
 # First run caches the canonical 160 MB CSV tarball under .cache/mmlu.
+# Qwen3.5-Base: use --prompt-style plain; "auto" applies the chat template's
+# empty <think> block, which this base model does not follow.
 python -m compress evaluate_compression \
-    --model-path Qwen/Qwen3.5-0.8B --mmlu law=professional_law:test \
-    --out mmlu_report.json
+    --model-path Qwen/Qwen3.5-0.8B --prompt-style plain \
+    --mmlu law=professional_law:test --out mmlu_report.json
 
 # Domain sub-network probe: zero weights by the math-vs-law activation contrast,
 # then score both domains under the same mask.
 python -m compress evaluate_compression \
-    --model-path Qwen/Qwen3.5-0.8B --mask-stats stats.pt \
+    --model-path Qwen/Qwen3.5-0.8B --mask-stats stats_math_law.pt \
     --mask-kind contrast --mask-seek math --mask-reject law --mask-sparsity 0.3 \
-    --mmlu law=professional_law:test --test math=math_test.csv \
+    --prompt-style plain \
+    --mmlu law=professional_law:test --mmlu math=college_mathematics:test \
     --out masked.json
 ```
 

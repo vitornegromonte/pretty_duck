@@ -34,6 +34,13 @@ def test_contrast_score_uses_pooled_variance():
     assert torch.allclose(z, torch.tensor([1.0, -1.0]) / math.sqrt(2.0), atol=1e-6)
 
 
+def test_contrast_score_clip_bounds_outliers():
+    stats = _stats(2, [1000, -1000])
+    z = contrast_scores(stats, "seek", "reject", clip=5.0)[LAYER]
+    assert z.abs().max() <= 5.0
+    assert z.tolist() == [5.0, -5.0]
+
+
 def test_contrast_mask_keeps_seek_channels_and_inverse_keeps_the_rest(tiny_model):
     layer = dict(tiny_model.named_modules())[LAYER]
     out_features, in_features = layer.weight.shape

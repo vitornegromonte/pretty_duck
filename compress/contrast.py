@@ -25,8 +25,16 @@ MASK_KINDS = ("none", "contrast", "contrast_abs", "inverse", "magnitude", "wanda
 MLP_MARKERS = ("gate_proj", "up_proj", "down_proj", ".mlp.")
 
 
-def contrast_scores(stats: dict, seek: str, reject: str) -> dict[str, torch.Tensor]:
-    """Signed per-input-channel contrast ``z`` for every layer in both domains."""
+def contrast_scores(
+    stats: dict, seek: str, reject: str, clip: float | None = None
+) -> dict[str, torch.Tensor]:
+    """Signed per-input-channel contrast ``z`` for every layer in both domains.
+
+    ``clip`` bounds ``|z|`` before masking, which keeps a few near-zero-variance
+    channels from dominating the per-row ranking.
+    """
+    if clip is not None and clip <= 0:
+        raise ValueError(f"z clip must be positive, got {clip}")
     if seek not in stats or reject not in stats:
         missing = [name for name in (seek, reject) if name not in stats]
         raise ValueError(
@@ -46,7 +54,10 @@ def contrast_scores(stats: dict, seek: str, reject: str) -> dict[str, torch.Tens
         r = stats[reject][name]
         var_s = torch.clamp(s["V"] - s["M"].square(), min=0.0)
         var_r = torch.clamp(r["V"] - r["M"].square(), min=0.0)
-        scores[name] = ((s["M"] - r["M"]) / torch.sqrt(var_s + var_r + EPS)).float()
+        z = (s["M"] - r["M"]) / torch.sqrt(var_s + var_r + EPS)
+        if clip is not None:
+            z = torch.clamp(z, -clip, clip)
+        scores[name] = z.float()
     return scores
 
 
@@ -69,6 +80,7 @@ def apply_domain_mask(
     sparsity: float = 0.3,
     seed: int = 0,
     only_mlp: bool = False,
+    z_clip: float | None = None,
 ) -> dict:
     """Zero weights in place and return a summary of what was masked.
 
@@ -96,7 +108,7 @@ def apply_domain_mask(
 
     z = None
     if kind in ("contrast", "contrast_abs", "inverse"):
-        z = contrast_scores(stats, seek, reject)
+        z = contrast_scores(stats, seek, reject, clip=z_clip)
         names = list(z)
     else:
         names = list(stats[seek])
@@ -155,4 +167,5 @@ def apply_domain_mask(
         "kept": kept,
         "kept_fraction": kept / weights if weights else 1.0,
         "only_mlp": only_mlp,
+        "z_clip": z_clip,
     }

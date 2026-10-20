@@ -10,7 +10,7 @@ from compress.contrast import apply_domain_mask, contrast_scores
 LAYER = "model.layers.0.mlp.down_proj"
 
 
-def _stats(in_features, z_signs):
+def _stats(in_features, z_signs, layer=LAYER):
     """Synthetic two-domain stats whose contrast z is proportional to z_signs."""
     signs = torch.tensor(z_signs, dtype=torch.float64)
     seek = {
@@ -25,7 +25,7 @@ def _stats(in_features, z_signs):
         "A": torch.ones(in_features, dtype=torch.float64),
         "count": 1,
     }
-    return {"seek": {LAYER: seek}, "reject": {LAYER: reject}}
+    return {"seek": {layer: seek}, "reject": {layer: reject}}
 
 
 def test_contrast_score_uses_pooled_variance():
@@ -88,6 +88,23 @@ def test_old_stats_without_signed_means_are_rejected(tiny_model):
         apply_domain_mask(
             tiny_model, stats, kind="contrast", seek="seek", reject="reject"
         )
+
+
+def test_only_mlp_skips_attention_linears(tiny_model):
+    attn = "model.layers.0.self_attn.q_proj"
+    stats = _stats(16, [1] * 16, layer=attn)
+    mlp = _stats(32, [1] * 32, layer=LAYER)
+    stats["seek"].update(mlp["seek"])
+    stats["reject"].update(mlp["reject"])
+    before = dict(tiny_model.named_modules())[attn].weight.detach().clone()
+
+    summary = apply_domain_mask(
+        tiny_model, stats, kind="magnitude", seek="seek", reject="reject",
+        sparsity=0.25, only_mlp=True,
+    )
+    assert summary["layers"] == 1
+    assert torch.equal(before, dict(tiny_model.named_modules())[attn].weight)
+    assert torch.count_nonzero(dict(tiny_model.named_modules())[LAYER].weight) == summary["kept"]
 
 
 def test_missing_domain_lists_the_available_ones(tiny_model):

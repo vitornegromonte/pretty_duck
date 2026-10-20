@@ -68,9 +68,10 @@ python -m compress evaluate_compression \
 (`|W|*|z|`), `inverse` (`|W|*relu(-z)`, the anti-domain control), `magnitude`,
 `wanda` (domain-agnostic activation norm), `random`, or `none`.
 `contrast`/`inverse`/`contrast_abs` also need `--mask-seek` and `--mask-reject`
-from the stats file.  The mask is applied after any `--compressed-dir` weights
-are loaded, per output row, in place; the report's `mask` block records what
-was actually zeroed.
+from the stats file.  `--mask-only-mlp` restricts masking to the MLP projections
+(Persona's `prune_only_mlp`), leaving attention and the head intact.  The mask
+is applied after any `--compressed-dir` weights are loaded, per output row, in
+place; the report's `mask` block records what was actually zeroed.
 
 `--target` accepts any domain present in the stats file: the pipeline is
 domain-agnostic.  `--signal contrastive` prioritizes blocks using

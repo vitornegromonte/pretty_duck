@@ -22,6 +22,7 @@ from .stats import tied_weight_ptrs
 
 EPS = 1e-6
 MASK_KINDS = ("none", "contrast", "contrast_abs", "inverse", "magnitude", "wanda", "random")
+MLP_MARKERS = ("gate_proj", "up_proj", "down_proj", ".mlp.")
 
 
 def contrast_scores(stats: dict, seek: str, reject: str) -> dict[str, torch.Tensor]:
@@ -67,6 +68,7 @@ def apply_domain_mask(
     reject: str | None = None,
     sparsity: float = 0.3,
     seed: int = 0,
+    only_mlp: bool = False,
 ) -> dict:
     """Zero weights in place and return a summary of what was masked.
 
@@ -77,7 +79,10 @@ def apply_domain_mask(
     if kind not in MASK_KINDS:
         raise ValueError(f"unknown mask kind {kind!r}; choose from {MASK_KINDS}")
     if kind == "none":
-        return {"kind": "none", "layers": 0, "weights": 0, "kept": 0, "kept_fraction": 1.0}
+        return {
+            "kind": "none", "layers": 0, "weights": 0, "kept": 0,
+            "kept_fraction": 1.0, "only_mlp": only_mlp,
+        }
     if not (0.0 <= sparsity < 1.0):
         raise ValueError(f"sparsity must be in [0, 1), got {sparsity}")
     if not seek or not reject:
@@ -103,6 +108,8 @@ def apply_domain_mask(
     layers = weights = kept = 0
     for name in names:
         if name.endswith("lm_head"):
+            continue
+        if only_mlp and not any(marker in name for marker in MLP_MARKERS):
             continue
         module = modules.get(name)
         if not isinstance(module, torch.nn.Linear):
@@ -147,4 +154,5 @@ def apply_domain_mask(
         "weights": weights,
         "kept": kept,
         "kept_fraction": kept / weights if weights else 1.0,
+        "only_mlp": only_mlp,
     }

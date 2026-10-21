@@ -111,7 +111,12 @@ def apply_to_model(model: torch.nn.Module, out_dir: str | Path) -> int:
     running a different configuration.
     """
     out_dir = Path(out_dir)
-    manifest = json.loads((out_dir / "manifest.json").read_text())
+    manifest_path = out_dir / "manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(
+            f"{manifest_path} not found; quantize_model did not finish writing this artifact"
+        )
+    manifest = json.loads(manifest_path.read_text())
     named = dict(model.named_modules())
     tied = tied_weight_ptrs(model)  # e.g. a lm_head tied to the embeddings
     applied = 0

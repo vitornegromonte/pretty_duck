@@ -46,6 +46,11 @@ def test_manifest_records_actual_file_sizes(tiny_model, tmp_path):
     assert serialize.measure_bytes(out) >= manifest["totals"]["file_nbytes"]
 
 
+def test_apply_to_model_requires_a_manifest(tiny_model, tmp_path):
+    with pytest.raises(FileNotFoundError, match="quantize_model"):
+        serialize.apply_to_model(tiny_model, tmp_path / "missing")
+
+
 def test_apply_to_model_mutates_weights_and_counts(tiny_model, tmp_path):
     out = tmp_path / "c"
     plan = _full_plan(tiny_model, "nf4")  # includes the tied lm_head

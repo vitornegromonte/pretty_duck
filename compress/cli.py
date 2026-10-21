@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -25,6 +26,7 @@ from . import serialize
 from .allocate import estimate_blocks, estimate_model_blocks, build_plan, load_plan, save_plan
 from .contrast import MASK_KINDS, apply_domain_mask
 from .evaluate import PROMPT_STYLES, evaluate_mc, evaluate_mmlu
+from .quant import storage_nbytes
 
 DEFAULT_FORMATS = "fp16,int8,int4,nf4"
 
@@ -58,6 +60,16 @@ def _weight_from(handle, keys: set[str], name: str):
         return handle.get_tensor(key)
     if name == "lm_head" and "model.embed_tokens.weight" in keys:
         return handle.get_tensor("model.embed_tokens.weight")
+    raise KeyError(key)
+
+
+def _shape_from(handle, keys: set[str], name: str) -> tuple[int, int]:
+    """Shape of a Linear weight without reading its payload (same fallback)."""
+    key = f"{name}.weight"
+    if key in keys:
+        return tuple(handle.get_slice(key).get_shape())
+    if name == "lm_head" and "model.embed_tokens.weight" in keys:
+        return tuple(handle.get_slice("model.embed_tokens.weight").get_shape())
     raise KeyError(key)
 
 
@@ -102,6 +114,23 @@ def _parse_mmlu(values: list[str]) -> dict[str, tuple[str, str]]:
 
 def _parse_formats(value: str) -> list[str]:
     return [f.strip() for f in value.split(",") if f.strip()]
+
+
+def _require_free_space(out_dir: str | Path, payload_bytes: int) -> None:
+    """Fail before writing when the destination cannot hold the artifact.
+
+    ``payload_bytes`` is the analytic payload; 10% covers torch.save framing
+    and the manifest.  This turns a mid-write ENOSPC into an actionable error.
+    """
+    out = Path(out_dir)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    required = int(payload_bytes * 1.1)
+    free = shutil.disk_usage(out.parent).free
+    if free < required:
+        raise SystemExit(
+            f"not enough disk for {out}: need ~{required / 1e9:.2f} GB, "
+            f"have {free / 1e9:.2f} GB free"
+        )
 
 
 def _load_model(path: str):
@@ -223,6 +252,11 @@ def cmd_quantize_model(args) -> dict:
     if st is not None:
         try:  # low-RAM path: quantize straight from the memory-mapped checkpoint
             with _open_safetensors(st) as (f, keys):
+                needed = sum(
+                    storage_nbytes(_shape_from(f, keys, name), spec["format"])
+                    for name, spec in plan["blocks"].items()
+                )
+                _require_free_space(args.out_dir, needed)
                 manifest = serialize.save_compressed_streamed(
                     lambda name: _weight_from(f, keys, name), plan, args.out_dir
                 )
@@ -231,6 +265,12 @@ def cmd_quantize_model(args) -> dict:
             manifest = None
     if manifest is None:
         model, _ = _load_model(args.model_path)
+        named = dict(model.named_modules())
+        needed = sum(
+            storage_nbytes(tuple(named[name].weight.shape), spec["format"])
+            for name, spec in plan["blocks"].items()
+        )
+        _require_free_space(args.out_dir, needed)
         manifest = serialize.save_compressed(model, plan, args.out_dir)
     return {
         "out_dir": str(args.out_dir),

@@ -5,13 +5,14 @@ Runs every subcommand exactly the way a user would.
 """
 
 import json
+from collections import namedtuple
 from pathlib import Path
 
 import pytest
 import torch
 from transformers import LlamaConfig, LlamaForCausalLM
 
-from compress.cli import main
+from compress.cli import _require_free_space, main
 from tests.conftest import VOCAB_SIZE
 
 
@@ -86,6 +87,16 @@ def test_full_pipeline_via_cli(capsys, model_dir, calib_file, mc_file, tmp_path)
     out = _run(capsys, "evaluate_compression", "--model-path", model_dir,
                "--test", f"T={mc_file}", "--out", str(tmp_path / "base.json"))
     assert out["compressed_dir"] is None
+
+
+def test_disk_preflight_reports_shortfall(monkeypatch, tmp_path):
+    Usage = namedtuple("usage", "total used free")
+    monkeypatch.setattr("compress.cli.shutil.disk_usage", lambda _: Usage(100, 99, 1))
+    with pytest.raises(SystemExit, match="not enough disk"):
+        _require_free_space(tmp_path, 100)
+
+    monkeypatch.setattr("compress.cli.shutil.disk_usage", lambda _: Usage(1000, 0, 1000))
+    _require_free_space(tmp_path, 100)
 
 
 def test_cli_budget_errors_are_reported(capsys, model_dir, calib_file, tmp_path):

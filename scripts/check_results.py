@@ -62,10 +62,12 @@ def _summary(rows: list[tuple[Path, dict]]) -> None:
         ratio = report.get("compression_ratio_vs_fp16_linears")
         ratio_text = f"{ratio:.2f}" if ratio else "-"
         for domain, result in sorted(report["results"].items()):
+            nll = result.get("nll_per_token")
+            nll_text = f"{nll:>8.4f}" if nll is not None else f"{'-':>8}"
             print(
                 f"{_short(path.name, 26):<26} {variant:<22} {domain:<10} "
                 f"{result['n']:>5} {result['accuracy']:>7.2f} "
-                f"{result['nll_per_token']:>8.4f} {ratio_text:>7}"
+                f"{nll_text} {ratio_text:>7}"
             )
 
 
@@ -105,18 +107,26 @@ def _paired_domain(
 ) -> None:
     ra, rb = base["results"][domain], candidate["results"][domain]
     d_acc = 100.0 * (rb["correct"] - ra["correct"]) / ra["n"] if ra["n"] else 0.0
-    d_nll = rb["nll_per_token"] - ra["nll_per_token"]
-    print(
+    nll_a = ra.get("nll_per_token")
+    nll_b = rb.get("nll_per_token")
+    line = (
         f"  {domain}: n={ra['n']}->{rb['n']}  "
-        f"acc {ra['accuracy']:.2f}->{rb['accuracy']:.2f}% ({d_acc:+.2f} pp)  "
-        f"NLL {ra['nll_per_token']:.4f}->{rb['nll_per_token']:.4f} "
-        f"({d_nll:+.4f})"
+        f"acc {ra['accuracy']:.2f}->{rb['accuracy']:.2f}% ({d_acc:+.2f} pp)"
     )
+    if nll_a is not None and nll_b is not None:
+        line += f"  NLL {nll_a:.4f}->{nll_b:.4f} ({nll_b - nll_a:+.4f})"
+    print(line)
+    if ra["n"] != rb["n"]:
+        print("    ! question counts differ; skipping paired tests")
+        return
 
     pa = ra.get("predictions") or []
     pb = rb.get("predictions") or []
     if not pa or not pb:
         print("    (no per-question predictions; aggregate delta only)")
+        return
+    if nll_a is None or nll_b is None:
+        print("    (no NLL in this report; accuracy test only)")
         return
     if len(pa) != len(pb):
         print("    ! prediction counts differ; skipping paired tests")

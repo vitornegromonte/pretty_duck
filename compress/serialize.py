@@ -15,7 +15,7 @@ from pathlib import Path
 
 import torch
 
-from .quant import quantize_weight, dequantize_weight, storage_nbytes
+from .quant import quantize_weight, dequantize_weight, storage_nbytes, parse_unit
 from .stats import tied_weight_ptrs
 
 
@@ -55,27 +55,46 @@ def save_compressed_streamed(
         "blocks": {},
         "totals": {"payload_nbytes": 0, "file_nbytes": 0, "fp16_reference_nbytes": 0},
     }
-    for name, spec in plan["blocks"].items():
-        fmt = spec["format"]
+    for name, units in _group_units(plan["blocks"]).items():
         W = get_weight(name)
         if W.dim() != 2:
             raise ValueError(f"{name}: expected a 2-D Linear weight, got {W.dim()}-D")
-        q = quantize_weight(W, fmt)
         file_path = tensors_dir / f"{name}.pt"
-        payload = {"format": q.format, "shape": tuple(W.shape), "codes": q.codes, "scale": q.scale}
-        if q.meta is not None:
-            payload.update(q.meta)  # bitsandbytes QuantState etc.
+        if units == [None]:  # whole-layer block (legacy and default granularity)
+            fmt = plan["blocks"][name]["format"]
+            q = quantize_weight(W, fmt)
+            payload = {"format": q.format, "shape": tuple(W.shape), "codes": q.codes, "scale": q.scale}
+            if q.meta is not None:
+                payload.update(q.meta)  # bitsandbytes QuantState etc.
+            payload_nbytes, analytic = q.nbytes, storage_nbytes(tuple(W.shape), fmt)
+            entry_format, extra = fmt, {}
+        else:  # row-group units: each stored on its own, rows [r0, r1)
+            if units[-1][0][1] != W.shape[0]:
+                raise ValueError(
+                    f"{name}: row groups do not tile the layer "
+                    f"(end at row {units[-1][0][1]} of {W.shape[0]})"
+                )
+            groups, payload_nbytes, analytic, counts = [], 0, 0, {}
+            for rows, fmt in units:
+                q = quantize_weight(W[rows[0]:rows[1]], fmt)
+                groups.append({"rows": rows, "format": q.format, "codes": q.codes, "scale": q.scale})
+                payload_nbytes += q.nbytes
+                analytic += storage_nbytes((rows[1] - rows[0], W.shape[1]), fmt)
+                counts[fmt] = counts.get(fmt, 0) + rows[1] - rows[0]
+            payload = {"format": "grouped", "shape": tuple(W.shape), "groups": groups}
+            entry_format, extra = "grouped", {"rows_by_format": counts}
         torch.save(payload, file_path)
         file_nbytes = file_path.stat().st_size
         manifest["blocks"][name] = {
             "file": str(file_path.relative_to(out_dir)),
-            "format": fmt,
+            "format": entry_format,
             "shape": list(W.shape),
-            "payload_nbytes": q.nbytes,
+            "payload_nbytes": payload_nbytes,
             "file_nbytes": file_nbytes,
-            "analytic_nbytes": storage_nbytes(tuple(W.shape), fmt),
+            "analytic_nbytes": analytic,
+            **extra,
         }
-        manifest["totals"]["payload_nbytes"] += q.nbytes
+        manifest["totals"]["payload_nbytes"] += payload_nbytes
         manifest["totals"]["file_nbytes"] += file_nbytes
         manifest["totals"]["fp16_reference_nbytes"] += W.numel() * 2
 
@@ -90,6 +109,31 @@ def save_compressed_streamed(
     return manifest
 
 
+def _group_units(blocks: dict) -> dict[str, list]:
+    """Group plan units by layer: ``{layer: [None]}`` or ``{layer: [(rows, fmt), ...]}``.
+
+    A layer is either planned whole or split into row groups that tile it
+    exactly; mixing the two for one layer is an error.
+    """
+    by_layer: dict[str, list] = {}
+    for name, spec in blocks.items():
+        layer, rows = parse_unit(name)
+        by_layer.setdefault(layer, []).append((rows, spec["format"]))
+    for layer, units in by_layer.items():
+        if any(r is None for r, _ in units):
+            if len(units) != 1:
+                raise ValueError(f"{layer}: whole-layer and row-group units are mixed")
+            by_layer[layer] = [None]
+            continue
+        units.sort()
+        edge = 0
+        for (r0, r1), _ in units:
+            if r0 != edge or r1 <= r0:
+                raise ValueError(f"{layer}: row groups do not tile the layer at row {edge}")
+            edge = r1
+    return by_layer
+
+
 def load_block(manifest: dict, out_dir: str | Path, name: str) -> torch.Tensor:
     """Read one stored block and reconstruct its float32 weight."""
     info = manifest["blocks"][name]
@@ -98,6 +142,13 @@ def load_block(manifest: dict, out_dir: str | Path, name: str) -> torch.Tensor:
         Path(out_dir) / info["file"], map_location="cpu",
         weights_only=info["format"] != "bnb_nf4",
     )
+    if payload["format"] == "grouped":
+        out, inc = payload["shape"]
+        weight = torch.empty(out, inc, dtype=torch.float32)
+        for g in payload["groups"]:
+            r0, r1 = g["rows"]
+            weight[r0:r1] = dequantize_weight(g["codes"], g["scale"], g["format"], (r1 - r0, inc))
+        return weight
     return dequantize_weight(
         payload["codes"], payload.get("scale", payload.get("state")), payload["format"],
         tuple(payload["shape"]),

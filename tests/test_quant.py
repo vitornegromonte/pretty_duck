@@ -12,8 +12,11 @@ from compress.quant import (
     diagonal_error,
     is_available,
     quant_error,
+    parse_unit,
     quantize_weight,
+    row_groups,
     storage_nbytes,
+    unit_name,
 )
 
 
@@ -132,3 +135,24 @@ def test_diagonal_error_scales_with_second_moment():
     v_big = torch.full((8,), 1e6)
     assert diagonal_error(E, v_big) > diagonal_error(E, v_small) * 1e11
     assert math.isfinite(diagonal_error(E, v_small))
+
+
+@pytest.mark.parametrize("fmt", ["fp16", "int8", "int4", "nf4"])
+@pytest.mark.parametrize("inc", [15, 48])  # odd width: int4 rows share a packed byte
+def test_row_group_quantizes_identically_to_the_same_rows_in_the_full_matrix(fmt, inc):
+    torch.manual_seed(1)
+    W = torch.randn(10, inc)
+    full = quantize_weight(W, fmt).dequant
+    for r0, r1 in row_groups(10, 4):
+        group = quantize_weight(W[r0:r1], fmt)
+        assert torch.equal(group.dequant, full[r0:r1])
+        assert group.nbytes == storage_nbytes((r1 - r0, inc), fmt)
+
+
+def test_unit_names_round_trip_and_row_groups_tile():
+    assert parse_unit(unit_name("model.layers.0.mlp.up_proj", 64, 128)) == (
+        "model.layers.0.mlp.up_proj", (64, 128))
+    assert parse_unit("model.layers.0.mlp.up_proj") == ("model.layers.0.mlp.up_proj", None)
+    assert row_groups(10, 4) == [(0, 4), (4, 8), (8, 10)]
+    with pytest.raises(ValueError):
+        row_groups(10, 0)

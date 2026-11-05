@@ -17,6 +17,13 @@ the block's normalized contrastive importance C_g = I_T,g - lambda *
 mean_S I_S,g; blocks unique to the target domain are then compressed last.
 This is a prioritization hypothesis, not a guarantee of better end-to-end
 accuracy -- only full evaluation can tell.
+
+``signal="tarc"`` (Target-Anchored Relative Contrast) replaces c_g by
+S_T(g) = R_T(g) - median_{d != T} R_d(g), with R_d = ranknorm(I_d) over blocks.
+Ranking each domain across blocks removes scale; subtracting the other
+domains' ranks cancels what they share (block size, layer type), leaving how
+much more the target leans on a block than a typical other domain does.  rho is
+multiplied by 1 + lam * max(S_T, 0), so ``lam`` is only the penalty strength.
 """
 
 from __future__ import annotations
@@ -28,15 +35,21 @@ from pathlib import Path
 import torch
 
 from .quant import PORTABLE_FORMATS, is_available, quantize_weight, quant_error, \
-    diagonal_error, block_importance, storage_nbytes
+    diagonal_error, block_importance, storage_nbytes, unit_name, row_groups
 
 
 def estimate_blocks(
     weights,
     domains_stats: dict[str, dict],
     formats: list[str],
+    row_group: int | None = None,
 ) -> dict[str, dict]:
     """Per-Linear shape, importance and diagonal quantization error.
+
+    With ``row_group`` set, each Linear is split into units of that many
+    consecutive output rows named ``layer@r0:r1`` (see ``quant.unit_name``);
+    every field below is then per unit, and ``nbytes`` is the exact payload of
+    the group stored on its own.
 
     ``weights`` is an iterable of ``(layer_name, weight_tensor)`` pairs, so
     callers can stream tensors from a safetensors file one layer at a time
@@ -52,6 +65,7 @@ def estimate_blocks(
 
     _validate_stats_coverage(domains_stats)
     estimates: dict[str, dict] = {}
+    seen: set[str] = set()
     for name, weight in weights:
         if weight.dim() != 2:
             raise ValueError(f"{name}: expected a 2-D Linear weight, got {weight.dim()}-D")
@@ -62,27 +76,33 @@ def estimate_blocks(
             domain: (dstats[name]["A"].to(W.device), dstats[name]["V"].to(W.device))
             for domain, dstats in domains_stats.items()
         }
-        errors = {d: {} for d in domains_stats}
+        spans = row_groups(W.shape[0], row_group) if row_group else [(0, W.shape[0])]
+        errors = {d: {} for d in domains_stats}  # domain -> fmt -> [per span]
         for fmt in formats:  # quantize once per format, reuse across domains
             q = quantize_weight(W, fmt)
             E = quant_error(W, q)
             for domain, (_, V) in moments.items():
-                errors[domain][fmt] = diagonal_error(E, V)
-        estimates[name] = {
-            "shape": tuple(W.shape),
-            "nbytes": {fmt: storage_nbytes(tuple(W.shape), fmt) for fmt in formats},
-            "importance": {
-                domain: block_importance(W, A) for domain, (A, _) in moments.items()
-            },
-            "error": errors,
-        }
-    missing = _stats_names(domains_stats) - set(estimates)
+                errors[domain][fmt] = [diagonal_error(E[r0:r1], V) for r0, r1 in spans]
+        seen.add(name)
+        for k, (r0, r1) in enumerate(spans):
+            shape = (r1 - r0, W.shape[1])
+            estimates[unit_name(name, r0, r1) if row_group else name] = {
+                "shape": shape,
+                "nbytes": {fmt: storage_nbytes(shape, fmt) for fmt in formats},
+                "importance": {
+                    domain: block_importance(W[r0:r1], A) for domain, (A, _) in moments.items()
+                },
+                "error": {d: {f: v[k] for f, v in by_fmt.items()} for d, by_fmt in errors.items()},
+            }
+    missing = _stats_names(domains_stats) - seen
     if missing:
         raise KeyError(f"weights iterator did not yield layers: {sorted(missing)[:5]}")
     return estimates
 
 
-def estimate_model_blocks(model, domains_stats: dict[str, dict], formats: list[str]) -> dict[str, dict]:
+def estimate_model_blocks(
+    model, domains_stats: dict[str, dict], formats: list[str], row_group: int | None = None
+) -> dict[str, dict]:
     """Convenience wrapper of :func:`estimate_blocks` for an in-memory model.
 
     Only layers present in the stats are estimated, so tied weights and
@@ -95,7 +115,7 @@ def estimate_model_blocks(model, domains_stats: dict[str, dict], formats: list[s
         if not isinstance(module, torch.nn.Linear):
             raise KeyError(f"stats layer {name!r} is not an nn.Linear in the model")
         linears.append((name, module.weight))
-    return estimate_blocks(linears, domains_stats, formats)
+    return estimate_blocks(linears, domains_stats, formats, row_group)
 
 
 def _stats_names(domains_stats: dict[str, dict]) -> set[str]:
@@ -135,7 +155,7 @@ def build_plan(
         raise ValueError("provide exactly one of error_budget or size_budget")
     if "fp16" not in formats:
         raise ValueError("formats must include 'fp16' (the uncompressed baseline precision)")
-    if signal not in ("error", "contrastive"):
+    if signal not in ("error", "contrastive", "tarc"):
         raise ValueError(f"unknown signal {signal!r}")
     for fmt in formats:
         if fmt not in PORTABLE_FORMATS:
@@ -146,15 +166,19 @@ def build_plan(
     if target not in next(iter(estimates.values()))["error"]:
         raise KeyError(f"target domain {target!r} not in estimates")
     secondary = secondary or []
+    if signal == "tarc" and not secondary:
+        secondary = [d for d in next(iter(estimates.values()))["error"] if d != target]
     for d in secondary:
         if d not in next(iter(estimates.values()))["error"]:
             raise KeyError(f"secondary domain {d!r} not in estimates")
 
     # Normalized contrastive importance in [0, 1]; used only by signal="contrastive".
-    contrast = (
-        _normalized_contrast(estimates, target, secondary, lam)
-        if signal == "contrastive" else {}
-    )
+    if signal == "contrastive":
+        contrast = _normalized_contrast(estimates, target, secondary, lam)
+    elif signal == "tarc":
+        contrast = target_anchored_contrast(estimates, target, secondary or None)
+    else:
+        contrast = {}
 
     state = {name: "fp16" for name in estimates}
     used_bytes = sum(e["nbytes"]["fp16"] for e in estimates.values())
@@ -235,6 +259,49 @@ def _normalized_contrast(
     return {name: (v - lo) / span for name, v in raw.items()}
 
 
+def ranknorm(values: list[float]) -> list[float]:
+    """Average-tie ranks scaled to [0, 1] (0.5 for a single value)."""
+    n = len(values)
+    if n == 1:
+        return [0.5]
+    order = sorted(range(n), key=values.__getitem__)
+    ranks = [0.0] * n
+    i = 0
+    while i < n:
+        j = i
+        while j + 1 < n and values[order[j + 1]] == values[order[i]]:
+            j += 1
+        for k in range(i, j + 1):
+            ranks[order[k]] = (i + j) / 2
+        i = j + 1
+    return [r / (n - 1) for r in ranks]
+
+
+def target_anchored_contrast(
+    estimates: dict[str, dict], target: str, others: list[str] | None = None
+) -> dict[str, float]:
+    """S_T(g) = R_T(g) - median_{d != T} R_d(g), in [-1, 1] per block.
+
+    ``others`` defaults to every domain in the estimates except the target.
+    """
+    names = list(estimates)
+    domains = list(estimates[names[0]]["importance"])
+    others = others if others is not None else [d for d in domains if d != target]
+    if not others:
+        raise ValueError("tarc needs at least one non-target domain")
+    ranks = {
+        d: ranknorm([estimates[n]["importance"][d] for n in names])
+        for d in [target, *others]
+    }
+    out = {}
+    for i, name in enumerate(names):
+        rs = sorted(ranks[d][i] for d in others)
+        mid = len(rs) // 2
+        median = rs[mid] if len(rs) % 2 else (rs[mid - 1] + rs[mid]) / 2
+        out[name] = ranks[target][i] - median
+    return out
+
+
 def _candidates(
     estimates: dict[str, dict],
     state: dict[str, str],
@@ -258,6 +325,8 @@ def _candidates(
             penalty = 1.0
             if signal == "contrastive" and lam > 0:
                 penalty += lam * contrast[name]
+            elif signal == "tarc" and lam > 0:
+                penalty += lam * max(contrast[name], 0.0)
             rho = delta_error * penalty / delta_bytes
             if not math.isfinite(rho):
                 continue  # defensive: skip NaN/Inf cost ratios

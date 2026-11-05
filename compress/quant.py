@@ -116,6 +116,35 @@ def storage_nbytes(shape: tuple[int, int], fmt: str) -> int:
 
 
 # ---------------------------------------------------------------------------
+# row-group units
+# ---------------------------------------------------------------------------
+# Every format quantizes each output row independently (per-row scales; nf4
+# blocks never straddle rows), so a group of consecutive rows quantized on its
+# own is bit-identical to the same rows inside the full matrix, and its
+# analytic bytes are ``storage_nbytes((rows, in_features), fmt)``.  A finer
+# allocation unit is therefore named ``"<layer>@<r0>:<r1>"`` (rows [r0, r1)).
+
+def unit_name(layer: str, r0: int, r1: int) -> str:
+    return f"{layer}@{r0}:{r1}"
+
+
+def parse_unit(name: str) -> tuple[str, tuple[int, int] | None]:
+    """Split a unit name into ``(layer, (r0, r1))``; whole layers give ``None``."""
+    layer, sep, rows = name.partition("@")
+    if not sep:
+        return layer, None
+    r0, _, r1 = rows.partition(":")
+    return layer, (int(r0), int(r1))
+
+
+def row_groups(out: int, group: int) -> list[tuple[int, int]]:
+    """Consecutive ``[r0, r1)`` row ranges of at most ``group`` rows."""
+    if group < 1:
+        raise ValueError(f"row group must be >= 1, got {group}")
+    return [(r, min(r + group, out)) for r in range(0, out, group)]
+
+
+# ---------------------------------------------------------------------------
 # packing helpers (4-bit formats store two signed weights per byte)
 # ---------------------------------------------------------------------------
 

@@ -100,3 +100,41 @@ def test_shape_mismatch_detected(tiny_model, tmp_path):
     )).eval()
     with pytest.raises(ValueError, match="shape mismatch"):
         serialize.apply_to_model(other, out)
+
+
+def test_row_group_plan_round_trips_with_mixed_formats_per_layer(tiny_model, tmp_path):
+    layer = "model.layers.0.mlp.up_proj"
+    W = dict(tiny_model.named_modules())[layer].weight.detach()
+    out = W.shape[0]
+    plan = _full_plan(tiny_model, "int8")
+    del plan["blocks"][layer]
+    mid = out // 2
+    plan["blocks"][f"{layer}@0:{mid}"] = {"format": "int4"}
+    plan["blocks"][f"{layer}@{mid}:{out}"] = {"format": "fp16"}
+    manifest = serialize.save_compressed(tiny_model, plan, tmp_path / "c")
+
+    info = manifest["blocks"][layer]
+    assert info["format"] == "grouped"
+    assert info["rows_by_format"] == {"int4": mid, "fp16": out - mid}
+    assert info["payload_nbytes"] == info["analytic_nbytes"]
+    stored = serialize.load_block(manifest, tmp_path / "c", layer)
+    expected = torch.cat([
+        quantize_weight(W[:mid], "int4").dequant, quantize_weight(W[mid:], "fp16").dequant
+    ])
+    assert torch.equal(stored, expected)
+
+    applied = serialize.apply_to_model(tiny_model, tmp_path / "c")
+    assert applied == len(manifest["blocks"]) - len(
+        [n for n in manifest["blocks"] if dict(tiny_model.named_modules())[n].weight.data_ptr()
+         in tied_weight_ptrs(tiny_model)])
+
+
+@pytest.mark.parametrize("bad", [{"@0:5": "a", "@6:32": "b"}, {"@0:5": "a", "@4:32": "b"}, {"@0:16": "a"}])
+def test_row_groups_must_tile_the_layer(tiny_model, tmp_path, bad):
+    layer = "model.layers.0.mlp.up_proj"  # 32 rows
+    plan = _full_plan(tiny_model, "int8")
+    del plan["blocks"][layer]
+    for suffix in bad:
+        plan["blocks"][layer + suffix] = {"format": "int8"}
+    with pytest.raises(ValueError, match="tile"):
+        serialize.save_compressed(tiny_model, plan, tmp_path / "c")

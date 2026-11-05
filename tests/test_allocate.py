@@ -3,7 +3,10 @@ import json
 import pytest
 import torch
 
-from compress.allocate import build_plan, estimate_model_blocks, load_plan, save_plan
+from compress.allocate import (
+    build_plan, estimate_model_blocks, load_plan, ranknorm, save_plan,
+    target_anchored_contrast,
+)
 from compress.stats import collect_domain
 from tests.conftest import CALIB_LINES
 
@@ -110,6 +113,41 @@ def test_contrastive_signal_changes_choice_under_tie():
     assert contrast["blocks"]["a_block"]["format"] == "fp16"  # protected
 
 
+def test_ranknorm_scales_to_unit_interval_with_average_ties():
+    assert ranknorm([5.0]) == [0.5]
+    assert ranknorm([3.0, 1.0, 2.0]) == [1.0, 0.0, 0.5]
+    assert ranknorm([1.0, 1.0, 2.0]) == [0.25, 0.25, 1.0]
+
+
+def test_tarc_cancels_structure_shared_by_all_domains():
+    # Block size drives every domain's importance the same way; only "c" leans
+    # on the target more than the other domains do.
+    errors = {d: {"fp16": 0.0, "int8": 1.0} for d in "TXYZ"}
+    imp = {
+        "a": {"T": 1.0, "X": 1.0, "Y": 1.0, "Z": 1.0},
+        "b": {"T": 2.0, "X": 2.0, "Y": 2.0, "Z": 2.0},
+        "c": {"T": 3.0, "X": 0.5, "Y": 0.5, "Z": 0.5},
+    }
+    est = {n: _est((10, 100), errors, imp[n]) for n in imp}
+    s_t = target_anchored_contrast(est, "T")
+    assert s_t == {"a": -0.5, "b": -0.5, "c": 1.0}  # a, b follow the shared trend
+    assert all(-1.0 <= v <= 1.0 for v in s_t.values())
+
+
+def test_tarc_signal_protects_target_leaning_block():
+    errors = {d: {"fp16": 0.0, "int8": 1.0} for d in "TXY"}
+    est = {
+        "a_block": _est((10, 100), errors, {"T": 100.0, "X": 1.0, "Y": 2.0}),
+        "b_block": _est((10, 100), errors, {"T": 1.0, "X": 100.0, "Y": 50.0}),
+    }
+    common = dict(target="T", formats=["fp16", "int8"], error_budget=1.0, lam=1.0)
+    assert build_plan(est, signal="error", **common)["blocks"]["a_block"]["format"] == "int8"
+    plan = build_plan(est, signal="tarc", **common)  # others default to X, Y
+    assert plan["secondary_domains"] == ["X", "Y"]
+    assert plan["blocks"]["a_block"]["format"] == "fp16"  # protected
+    assert plan["blocks"]["b_block"]["format"] == "int8"
+
+
 def test_budget_mode_exactly_one():
     with pytest.raises(ValueError, match="exactly one"):
         build_plan(_two_block_estimates(), target="T", formats=["fp16", "int8"])
@@ -164,3 +202,31 @@ def test_decisions_record_each_step():
         assert spec["format"] == last[name]
     for d in plan["decisions"]:
         assert d["delta_bytes"] > 0 and d["to"] != d["from"]
+
+
+def test_row_group_units_partition_the_layer_estimates(tiny_model, tokenizer):
+    stats = {"d": collect_domain(tiny_model, tokenizer, CALIB_LINES, n_samples=4),
+             "e": collect_domain(tiny_model, tokenizer, CALIB_LINES[::-1], n_samples=4)}
+    formats = ["fp16", "int8", "int4", "nf4"]
+    whole = estimate_model_blocks(tiny_model, stats, formats)
+    grouped = estimate_model_blocks(tiny_model, stats, formats, row_group=6)
+    assert all("@" in name for name in grouped)
+    for layer, w in whole.items():
+        units = [g for name, g in grouped.items() if name.startswith(layer + "@")]
+        assert sum(u["shape"][0] for u in units) == w["shape"][0]
+        for d in stats:
+            assert sum(u["importance"][d] for u in units) == pytest.approx(w["importance"][d])
+            for fmt in formats:
+                assert sum(u["error"][d][fmt] for u in units) == pytest.approx(w["error"][d][fmt])
+        for fmt in ("fp16", "int8"):  # int4/nf4 differ only by per-group byte padding
+            assert sum(u["nbytes"][fmt] for u in units) == w["nbytes"][fmt]
+
+
+def test_row_group_plan_mixes_formats_within_one_layer():
+    errors = {"T": {"fp16": 0.0, "int8": 1.0}}
+    est = {
+        "L@0:4": _est((4, 100), errors, {"T": 1.0}),
+        "L@4:8": _est((4, 100), {"T": {"fp16": 0.0, "int8": 50.0}}, {"T": 1.0}),
+    }
+    plan = build_plan(est, target="T", formats=["fp16", "int8"], error_budget=2.0)
+    assert plan["blocks"] == {"L@0:4": {"format": "int8"}, "L@4:8": {"format": "fp16"}}

@@ -26,7 +26,8 @@ from . import serialize
 from .allocate import estimate_blocks, estimate_model_blocks, build_plan, load_plan, save_plan
 from .contrast import MASK_KINDS, apply_domain_mask
 from .evaluate import PROMPT_STYLES, evaluate_mc, evaluate_mmlu
-from .quant import storage_nbytes
+from .patching import causal_probe
+from .quant import parse_unit, storage_nbytes
 
 DEFAULT_FORMATS = "fp16,int8,int4,nf4"
 
@@ -186,6 +187,44 @@ def cmd_collect_stats(args) -> dict:
     return {"out": args.out, "layers": len(next(iter(domains.values()))), "valid_tokens": n_tokens}
 
 
+def _read_eval_lines(path: str, n: int | None, seed: int) -> list[str]:
+    import random
+
+    lines = [ln.strip() for ln in Path(path).read_text(encoding="utf-8").splitlines() if ln.strip()]
+    if not lines:
+        raise SystemExit(f"{path}: no non-empty lines")
+    random.Random(seed).shuffle(lines)
+    return lines[:n] if n else lines
+
+
+def cmd_causal_probe(args) -> dict:
+    domains, meta = stats_mod.load_stats(args.stats)
+    for d in [args.target, *args.others]:
+        if d not in domains:
+            raise KeyError(f"stats file has no domain {d!r}; has {sorted(domains)}")
+    targets = _parse_pairs(args.eval_target, "eval-target")
+    if len(targets) != 1:
+        raise SystemExit("provide exactly one --eval-target name=file.txt")
+    others = _parse_pairs(args.eval_other, "eval-other")
+    if not others:
+        raise SystemExit("provide at least one --eval-other name=file.txt")
+    (tname, tpath), = targets.items()
+    model, tokenizer = _load_model(args.model_path)
+    report = causal_probe(
+        model, tokenizer, domains, target=args.target, others=args.others,
+        eval_target=(tname, _read_eval_lines(tpath, args.n_eval, args.seed)),
+        eval_others={n: _read_eval_lines(p, args.n_eval, args.seed) for n, p in others.items()},
+        k_fracs=args.k_frac, n_random=args.n_random, replace=args.replace, seed=args.seed,
+        batch_size=args.batch_size, max_len=args.max_len, n_boot=args.n_boot,
+        log=lambda msg: print(msg, file=sys.stderr, flush=True),
+    )
+    report["config"].update({"model": args.model_path, "stats_file": str(args.stats),
+                             "stats_meta": meta})
+    Path(args.out).write_text(json.dumps(report, indent=1))
+    return {"out": args.out, "conditions": len(report["conditions"]),
+            "baseline_nll": report["baseline_nll"]}
+
+
 def cmd_estimate_quant_error(args) -> dict:
     domains, meta = stats_mod.load_stats(args.stats)
     formats = _parse_formats(args.formats)
@@ -195,20 +234,23 @@ def cmd_estimate_quant_error(args) -> dict:
     st = _safetensors_path(args.model_path)
     if st is not None:
         try:  # low-RAM path: stream one weight at a time from the checkpoint
-            estimates = estimate_blocks(_stream_weights(st, names), domains, formats)
+            estimates = estimate_blocks(
+                _stream_weights(st, names), domains, formats, args.row_group
+            )
             source = "safetensors"
         except KeyError:  # stats layer missing from the checkpoint -> full load
             estimates = None
     if estimates is None:
         model, _ = _load_model(args.model_path)
-        estimates = estimate_model_blocks(model, domains, formats)
+        estimates = estimate_model_blocks(model, domains, formats, args.row_group)
 
     # JSON needs lists, not tuples.
     for e in estimates.values():
         e["shape"] = list(e["shape"])
     blob = {
         "meta": {"model": args.model_path, "stats_file": str(args.stats),
-                 "stats_meta": meta, "formats": formats, "weights_source": source},
+                 "stats_meta": meta, "formats": formats, "weights_source": source,
+                 "row_group": args.row_group},
         "layers": estimates,
     }
     Path(args.out).write_text(json.dumps(blob, indent=1, sort_keys=True))
@@ -245,6 +287,18 @@ def cmd_allocate_bits(args) -> dict:
     }
 
 
+def _plan_nbytes(plan: dict, shape_of) -> int:
+    """Analytic payload bytes of a plan whose units are layers or row groups."""
+    total = 0
+    for name, spec in plan["blocks"].items():
+        layer, rows = parse_unit(name)
+        out, inc = shape_of(layer)
+        if rows:
+            out = rows[1] - rows[0]
+        total += storage_nbytes((out, inc), spec["format"])
+    return total
+
+
 def cmd_quantize_model(args) -> dict:
     plan = load_plan(args.plan)
     manifest, source = None, "model-load"
@@ -252,9 +306,8 @@ def cmd_quantize_model(args) -> dict:
     if st is not None:
         try:  # low-RAM path: quantize straight from the memory-mapped checkpoint
             with _open_safetensors(st) as (f, keys):
-                needed = sum(
-                    storage_nbytes(_shape_from(f, keys, name), spec["format"])
-                    for name, spec in plan["blocks"].items()
+                needed = _plan_nbytes(
+                    plan, lambda layer: _shape_from(f, keys, layer)
                 )
                 _require_free_space(args.out_dir, needed)
                 manifest = serialize.save_compressed_streamed(
@@ -266,10 +319,7 @@ def cmd_quantize_model(args) -> dict:
     if manifest is None:
         model, _ = _load_model(args.model_path)
         named = dict(model.named_modules())
-        needed = sum(
-            storage_nbytes(tuple(named[name].weight.shape), spec["format"])
-            for name, spec in plan["blocks"].items()
-        )
+        needed = _plan_nbytes(plan, lambda layer: tuple(named[layer].weight.shape))
         _require_free_space(args.out_dir, needed)
         manifest = serialize.save_compressed(model, plan, args.out_dir)
     return {
@@ -359,8 +409,32 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model-path", required=True)
     p.add_argument("--stats", required=True)
     p.add_argument("--formats", default=DEFAULT_FORMATS)
+    p.add_argument("--row-group", type=int, default=None, metavar="N",
+                   help="split every Linear into units of N consecutive output rows "
+                        "(default: one unit per Linear)")
     p.add_argument("--out", required=True)
     p.set_defaults(func=cmd_estimate_quant_error)
+
+    p = sub.add_parser("causal_probe", help="channel ablation: do candidate sets matter causally?")
+    p.add_argument("--model-path", required=True)
+    p.add_argument("--stats", required=True)
+    p.add_argument("--target", required=True, help="stats domain whose channels are probed")
+    p.add_argument("--others", action="append", required=True, metavar="DOMAIN",
+                   help="stats domains used for the contrast and the replacement mean")
+    p.add_argument("--eval-target", action="append", default=[], metavar="NAME=FILE",
+                   help="held-out text (one sample per line) for the target domain")
+    p.add_argument("--eval-other", action="append", default=[], metavar="NAME=FILE")
+    p.add_argument("--k-frac", type=float, action="append", default=None,
+                   help="fraction of each layer's input channels (repeatable; default 0.05 0.1 0.2)")
+    p.add_argument("--n-random", type=int, default=3)
+    p.add_argument("--replace", choices=["mean", "zero"], default="mean")
+    p.add_argument("--n-eval", type=int, default=40, help="lines per eval file (seeded sample)")
+    p.add_argument("--n-boot", type=int, default=1000)
+    p.add_argument("--batch-size", type=int, default=8)
+    p.add_argument("--max-len", type=int, default=128)
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--out", required=True)
+    p.set_defaults(func=cmd_causal_probe)
 
     p = sub.add_parser("allocate_bits", help="greedy heterogeneous allocation")
     p.add_argument("--errors", required=True)
@@ -369,7 +443,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--formats", default=DEFAULT_FORMATS)
     p.add_argument("--error-budget", type=float, default=None)
     p.add_argument("--size-budget", type=int, default=None)
-    p.add_argument("--signal", choices=["error", "contrastive"], default="error")
+    p.add_argument("--signal", choices=["error", "contrastive", "tarc"], default="error")
     p.add_argument("--lam", type=float, default=0.5)
     p.add_argument("--out", required=True)
     p.set_defaults(func=cmd_allocate_bits)
@@ -405,6 +479,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
+    if getattr(args, "k_frac", 1) is None:
+        args.k_frac = [0.05, 0.1, 0.2]
     try:
         summary = args.func(args)
     except (ValueError, KeyError) as exc:

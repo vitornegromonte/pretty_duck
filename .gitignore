@@ -20,3 +20,7 @@ graphify*/
 TASK.md
 REQ.md
 ARCHITECTURE.md
+# LaTeX build files (docs/*.tex and docs/*.pdf are tracked)
+docs/*.aux
+docs/*.log
+docs/*.out

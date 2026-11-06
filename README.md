@@ -86,6 +86,81 @@ One end-to-end run on a real trained model:
 python experiments/run_smollm.py   # SmolLM-135M, wealth target, honesty secondary
 ```
 
+### Finer allocation units and the target-anchored signal
+
+```bash
+# split every Linear into units of 64 consecutive output rows ("layer@r0:r1")
+python -m compress estimate_quant_error \
+    --model-path HuggingFaceTB/SmolLM-135M --stats stats.pt \
+    --formats fp16,int8,int4,nf4 --row-group 64 --out errors_rg64.json
+
+# target-anchored relative contrast: S_T = R_T - median_{d != T} R_d
+python -m compress allocate_bits --errors errors_rg64.json --target math \
+    --signal tarc --lam 10 --size-budget 117000000 --out plan.json
+```
+
+Every format quantizes output rows independently, so a row group stored on its
+own is bit-identical to the same rows in the full matrix and its byte cost is
+exact. `quantize_model` regroups units into one file per layer (mixed formats
+per layer are fine) and refuses plans whose groups do not tile a layer.
+`--signal tarc` ranks each domain's importance across units, subtracts the
+median rank of the other domains (all non-target domains in the errors file
+unless `--secondary` is given) and multiplies the cost by
+`1 + lam * max(S_T, 0)`; here `--lam` is only the penalty strength. The greedy
+re-scans all candidates at every step: about 24 s for 2.4k units on SmolLM-135M,
+so per-row units (about 30k) would need a priority queue.
+
+### Causal probes
+
+Statistics say a channel is more *active* on a domain, not that the model
+*needs* it. These probes intervene on Linear inputs (forward-only, no
+gradients, weights never modified).
+
+```bash
+# held-out evaluation text (MMLU test) and calibration text (MMLU val)
+python scripts/make_mmlu_calib.py --split test --out-dir outputs/eval \
+    math=college_mathematics,elementary_mathematics law=professional_law
+python scripts/make_mmlu_calib.py --out-dir outputs/calib \
+    math=college_mathematics,elementary_mathematics law=professional_law
+
+# mean ablation of candidate channel sets vs size- and dose-matched controls
+python -m compress causal_probe --model-path HuggingFaceTB/SmolLM-135M \
+    --stats stats.pt --target math --others law \
+    --eval-target math=outputs/eval/math.txt --eval-other law=outputs/eval/law.txt \
+    --k-frac 0.01 --k-frac 0.02 --n-random 5 --out probe.json
+```
+
+Channel sets: `tarc`, `zdiff` (standardized mean difference), `importance`
+(top `A_T`), `anti`, `random` (matched on `V` rank), `energy_random` (matched on
+the perturbation energy the patch inflicts). Selectivity is the NLL increase on
+the target minus the mean increase on the other domains, with a bootstrap CI.
+
+Persona experiments (minimal-pair patching). The scripts need `PYTHONPATH=.`:
+
+```bash
+python scripts/make_persona_calib.py Persona/data/wealth_train.csv \
+    --out-dir outputs/persona_calib        # seek.txt / reject.txt, parsed with csv
+python -m compress collect_stats --model-path Qwen/Qwen3.5-0.8B \
+    --calib seek=outputs/persona_calib/seek.txt \
+    --calib reject=outputs/persona_calib/reject.txt --out stats_persona.pt
+
+T=Persona/data/wealth_test_infer.csv
+# does the persona prompt move the margin? includes shuffled/irrelevant controls
+python scripts/persona_gate.py --model-path Qwen/Qwen3.5-0.8B --test $T --out gate.json
+# sufficiency; add --reverse for necessity (patch the other prompt's activations in)
+python scripts/persona_patch.py --model-path Qwen/Qwen3.5-0.8B \
+    --stats stats_persona.pt --test $T --k-frac 0.05 --per-question --out patch.json
+# quantize only the selected weight columns; how much of the shift survives?
+python scripts/persona_quant.py --model-path Qwen/Qwen3.5-0.8B \
+    --stats stats_persona.pt --test $T --out quant.json
+```
+
+`persona_patch.py` runs three prompt pairs on the same questions (real
+seek/reject, word-shuffled, unrelated). Patching every Linear input over the
+aligned suffix reproduces the clean run exactly (restoration 1.000), which the
+tests assert and every run reports. `persona_quant.py` uses bit widths below 4
+only as stronger interventions; nothing is stored in those formats.
+
 ## Formats
 
 | name | bits/weight | granularity | storage |
@@ -111,6 +186,39 @@ python experiments/run_smollm.py   # SmolLM-135M, wealth target, honesty seconda
   exact payload formulas (asserted against packed tensors in the tests), the
   reports use measured bytes.
 
+## Findings so far (measured; see `docs/method.pdf`)
+
+All of this is one model per experiment (SmolLM-135M for statistics, plans and
+mean ablation; Qwen3.5-0.8B for the persona experiments), one trait, one seed.
+
+* **Block and row-group signals are too weak to change a plan.** Math-vs-law
+  error and importance rank correlations over blocks are 0.995-0.996; target-anchored
+  `S_T` is reproducible across calibration halves (split-half 0.91-0.93) but its
+  spread is small (std 0.02-0.03), and error-only plans for a math vs a law
+  target differ in 2/210 blocks (22/2430 row groups).
+* **Per input channel the signal is wider** (std 0.20, 20% of channels with
+  |S_T| > 0.25, split-half 0.84).
+* **Mean-ablation selectivity is explained by dose.** A channel set chosen by
+  contrast looks selective (damage ratio 1.6-2.5x), but sets matched on the
+  perturbation energy reproduce it (gap within +-0.012 nats, inside the control spread).
+* **Persona prompts move the answer margin, mostly through word overlap.**
+  The seek-minus-reject margin shift on the 200 wealth questions is +2.82 nats
+  for Qwen3.5-0.8B; shuffled-word prompts give +1.95 and unrelated prompts +0.91.
+  SmolLM-135M responds only to word overlap (shuffled +0.97 vs real +0.83).
+  The answer *choices* stay near chance under every prompt.
+* **A standardized-mean-difference selector (`zdiff`) finds channels that are
+  sufficient and necessary for the shift** (5% of channels: restores 0.84 vs 0.18
+  for random, destroys 0.80 vs 0.15), at random level on the unrelated pair, and
+  with a paired real-minus-shuffled gain of +1.11 [0.85, 1.37] nats. The rank
+  contrast `tarc` also restores the unrelated pair, so it is not persona-specific.
+* **That does not become a quantization signal.** Quantizing the selected columns
+  at 3-4 bits leaves the persona shift intact, like random columns of the same
+  dose; only 2-bit shows a hint, inside the noise.
+
+Not shown: factual-knowledge sub-networks, other traits (the honesty split has no
+defined prompts), other models or seeds. Patching covers the question and answer
+tokens, so it shows where an effect is expressed, not where it is stored.
+
 ## Limitations
 
 * `estimate_quant_error` and `quantize_model` stream weights straight from
@@ -135,6 +243,12 @@ python experiments/run_smollm.py   # SmolLM-135M, wealth target, honesty seconda
   a machine with enough RAM (the SmolLM-135M experiment needs ~2 GB free).
 * Persona's sparse-mask method (weight zeroing) is a different mechanism from
   quantization and is preserved untouched in `Persona/`.
+* The Persona CSVs contain multi-line fields; read them with `csv` (as
+  `scripts/make_persona_calib.py` does), not line by line, or headers and split
+  rows end up in the calibration text.
+* The minimal-pair and column-quantization probes score the wealth persona only;
+  `h_test_infer.csv` has no defined honesty prompts and its `matching` label appears
+  to mark the dishonest answer, so it is not used.
 
 ## Run on Colab
 

@@ -190,7 +190,7 @@ only as stronger interventions; nothing is stored in those formats.
 
 Current method: find the sparse circuit a domain's knowledge depends on by minimal-pair patching, validate it
 on held-out facts, and protect its weight columns at full precision while the rest is quantized group-wise at a
-low bit width. Twenty experiments (E1 to E20) are summarized in Section "Summary of the experiments" of
+low bit width. Twenty-three experiments (E1 to E23) are summarized in Section "Summary of the experiments" of
 `docs/method.pdf` and recorded with numbers and caveats in
 `docs/adr/0001-domain-aware-quantization-experiment-record.md`.
 
@@ -199,13 +199,21 @@ low bit width. Twenty experiments (E1 to E20) are summarized in Section "Summary
     domain's answer logit difference on held-out facts (Qwen3.5-4B, legal siglas: 0.74 with 8 of 5,504 units).
   * At neuron level the MLP part of a circuit is specific to its domain; attention heads are shared.
   * A directly measured per-layer sensitivity table is cheap, roughly additive and the best allocation signal found.
-  * Under group-wise int4 (Qwen3.5-4B), protecting 0.30% of the weights chosen by the Brazilian-law circuit
-    recovers about a third of the OAB accuracy loss (+3.2 points [+1.5, +4.8]); circuits of other domains, a
-    non-legal Portuguese circuit, dose-based, activation-based and random choices do not.
+  * Under group-wise int4 with round-to-nearest (Qwen3.5-4B), protecting 0.30% of the weights chosen by the
+    Brazilian-law circuit recovers about a third of the OAB accuracy loss (+3.2 points [+1.5, +4.8]); circuits of
+    other domains, a non-legal Portuguese circuit, dose-based, activation-based and random choices do not. **This
+    did not survive the stronger tests below.**
+  * In the quantizer itself, clipping the group range is the largest gain measured: GPTQ int3 NLL gap to fp16
+    0.18 to 0.07 (E23).
+* **What did not hold up (E21, E22).** On Portuguese MMMLU the law circuit helps law and non-law questions alike and
+  random sets match it; under GPTQ (validated against the authors' code) protection is indistinguishable from uniform.
+  Letter accuracy of equivalent quantized models varies by about ±6 points (the same GPTQ gave 49.5% and 40.7% on two
+  GPUs), a spread the question-level intervals did not cover, so E18 to E20 are single-realization results. Judge
+  damage with continuous metrics (neutral NLL, held-out log-probability) and several realizations.
 * **What did not.** A domain-contrast score (TARC) does not change a bit allocation; mean-ablation selectivity is
   explained by perturbation dose; the diagonal error `D` is uncorrelated with the measured damage per layer;
   quantizing persona-selected channels at 3-4 bits is no worse than random channels; no method helps at int3 or int2.
-* **Limits.** One model family, one seed, small fact sets (13-15 validation pairs for the legal siglas, which are an
+* **Limits.** One model family, one seed per condition (rounding noise is not sampled), small fact sets (13-15 validation pairs for the legal siglas, which are an
   unreviewed draft in `docs/revisao_juridica/`), intervals over questions only, simulated quantization (no speedup).
   The legal circuit is the best of eight protected sets at each size, which is supportive, not conclusive.
 

@@ -1,7 +1,7 @@
 # ADR 0001: Domain-aware heterogeneous quantization — what was tested and what we decided
 
-- **Status:** Accepted (decisions D1–D7 stand until new evidence overturns them; section 7 lists what is still open)
-- **Date:** 2026-11-10 (updated 2026-11-17 with E15 to E18)
+- **Status:** Accepted (decisions D1–D10 stand until new evidence overturns them; section 7 lists what is still open)
+- **Date:** 2026-11-10 (updated 2026-11-17 with E15 to E23)
 - **Branch:** `feature/domain-compression`
 - **Related:** `docs/method.pdf` (method and Appendix B), `README.md` ("Findings so far"), `REQ.md` / `TASK.md` (original spec)
 
@@ -33,6 +33,8 @@ and 6 full-attention) on an RTX 3090 (`maidai`) for the persona, circuit and all
 | D6 | **Evaluate allocation at equal actual bytes with the real formats** (nf4 baseline, budgets as extra bytes). Simulated per-row int4/3/2 whole-model baselines are too destructive to be informative. | E12, E13 |
 | D7 | **Report intervals or random-draw spreads, and mark metric/data limits.** Several results below lack confidence intervals; they are flagged. | all |
 | D8 | **Judge protection on group-wise quantization at a bit width where uniform quantization loses accuracy without collapsing, and measure damage by accuracy, not by the NLL of the correct letter** (that NLL fell under quantization, from 5.07 to 3.43, so it is not a damage measure). | E18 |
+| D9 | **Letter accuracy of one quantized model is not a reliable damage measure.** Equivalent quantizers differ by up to ±6 OAB points (E22), so every accuracy comparison from a single rounding realization, including E18 to E20, is weaker than its question-level interval suggests. Use continuous metrics (NLL on neutral text, log-probability of held-out facts, and planned KL to the fp16 model and option-permuted letter probabilities) and several realizations (calibration draws) per condition. | E21, E22 |
+| D10 | **Improve the quantizer before the protection set.** Clipping alone moves GPTQ int3 from a NLL gap of 0.18 to 0.07 over fp16 (E23), more than any circuit effect measured. | E22, E23 |
 
 ## 3. Experiment log
 
@@ -166,23 +168,46 @@ and 6 full-attention) on an RTX 3090 (`maidai`) for the persona, circuit and all
 - **Still open:** a non-law Portuguese benchmark (does the law circuit help only law?), another legal task (the reviewed sheet), more random draws and seeds, and a larger model.
 - **Artifacts:** `docs/controles/fatos_siglas_gerais_ptbr.csv`, `compress/oab.py` (`FEW_SHOT["siglas_gerais"]`), `outputs/circuit_probe_4b_gerais.json`, `outputs/protect_law_4b_gerais.json`.
 
+### E21 — Does the law circuit help only law? Portuguese MMMLU (Qwen3.5-4B, int4, group 64, RTN)
+- **Setup:** 500 law questions (professional law, jurisprudence, international law; mostly US law translated) and 500 non-law questions from MMMLU PT-BR, one seeded sample for every condition; protected sets of 32 and 128 units (0.30% and 1.08%), 6 random draws per size, the general-siglas circuit as control; paired bootstrap over questions.
+- **Result:** fp16 41.0% law / 54.2% other; uniform int4 39.0% / 53.6% (only 2.0 and 0.6 points of headroom). Gain over uniform in points (law / other): circuit k=128 +1.8 [0.0, +3.6] / +1.2 [−0.2, +2.6]; circuit k=32 +0.8 / +0.8; random k=128 (mean of 6) +0.7 / +0.9; random k=32 0.0 / −0.4; dose k=128 +0.6 / +0.8; general-siglas circuit k=128 −1.8 / −2.6; AWQ-like k=128 −3.2 / −3.6.
+- **Verdict:** no law specificity: the circuit helps law and non-law questions alike, and random sets give the same gain at k=128. Together with E22 this weakens E18 to E20; the headroom is too small for any set to show a clear effect.
+- **Artifacts:** `compress/oab.py` (`load_mmmlu`), `scripts/protect_law.py --benchmark mmmlu`, `outputs/protect_mmmlu_4b.json`.
+
+### E22 — Real baselines: GPTQ, the authors' GPTQ and rounding noise (Qwen3.5-4B, int4, group 64, 600 OAB questions)
+- **Setup:** `compress/gptq.py` (sequential GPTQ on the same symmetric group grid, calibration of 160 lines from five domains), compared with RTN and with the authors' code (IST-DASLab/gptq, not vendored) run on the same grid and Hessians; protection sets with equal weight budgets under GPTQ, plus a global outlier baseline (`outlier_all`: columns of any layer by dose per weight).
+- **Validation:** on test matrices the output error of our GPTQ matches the reference (16.88 vs 16.85; 236.6 vs 235.8; RTN 32.8 and 493). End to end: NLL on 48 neutral lines fp16 2.331, RTN 2.394, our GPTQ 2.362, reference 2.352.
+- **Noise:** OAB accuracy of fp16 43.8%; RTN 35.0%; reference GPTQ 34.7%; our GPTQ 49.5% on the 3080 Ti and 40.7% on the 3090 with identical code and calibration. Quantizers of the same quality differ by about ±6 points, a spread our question-level intervals never covered.
+- **Protection under GPTQ (one realization, 3080 Ti; k=32 / k=128):** uniform 49.5; circuit 47.8 / 46.7; dose 49.2 / 53.2; AWQ-like 48.5 / 38.7; outlier_all 40.5 / 42.7; random 46.8 to 49.8 / 36.0 to 40.8. Circuit columns hardly overlap the outlier columns (1 of 4,224 and 19 of 15,040) or the AWQ columns (83 and 772).
+- **Verdict:** under GPTQ protection gives no demonstrated gain: the circuit is indistinguishable from uniform, and the larger differences (outlier_all −7 to −9, random −9 to −13 at k=128, dose +3.7) sit inside the realization noise. A synthetic test (massive-activation channels) shows protecting high-dose columns lowers layer error 20x and that neither damping nor error-sink handling (`sink=True`) explains a loss, so the outlier_all drop is not mechanistically explained. Inconclusive; replicates with NLL pending (suite `protect`).
+- **Artifacts:** `compress/gptq.py`, `scripts/baselines.py`, `tests/test_gptq.py`, `outputs/baselines_4b.json`, `outputs/gptq_ref_4b.json`.
+
+### E23 — The quantizer grid at int3 (Qwen3.5-4B, group 64; partial, one realization)
+- **Setup:** `scripts/quant_suite.py --suites grid`, GPTQ with clipping (per group and row, the range shrink with least rounding error), asymmetric grid and act-order; metrics NLL on neutral text, log-probability of held-out sigla facts and OAB accuracy.
+- **Result (neutral NLL / law log-probability / OAB; fp16 2.331 / about −0.17 / 43.8%):** RTN 2.883 / −1.66 / 25.2%; GPTQ 2.513 / −1.39 / 36.3%; GPTQ+clip 2.397 / −0.63 / 43.3%; +asym 2.432 / −0.60 / 33.8%; clip+asym 2.393 / −0.31 / 34.8%; +act-order 2.491 / −1.34 / 34.0%; clip+asym+act-order 2.387 / −0.50 / 27.2%.
+- **Verdict:** clipping is the main lever: it closes about 64% of the NLL gap GPTQ leaves to fp16 (0.182 to 0.066); asymmetry and act-order add little in NLL (asymmetry helps the sigla log-probability). OAB accuracy does not follow NLL (27.2% for the best NLL) and is dominated by noise (D9). Remaining suites (int4, group 32, domain calibration, protection with replicates, soft weights, mixed bits, low rank) are running or queued.
+- **Artifacts:** `scripts/quant_suite.py`, `outputs/suiteA.json`.
+
 ## 4. Consequences
 
 **What the project can now claim (measured, with the stated caveats):**
 - Causal channel sets for a behaviour can be found by minimal-pair patching and validated against dose-matched and lexical controls (E6).
 - Factual recall sits in sparse cross-layer circuits (~1% of units). At neuron level the MLP part is domain-specific and nearly disjoint across domains, while attention heads form a shared part that carries the rest (E9, E10, E14).
 - Measured per-layer sensitivity is roughly additive and a much better allocation signal than the diagonal `D` (E8, E13).
-- On Qwen3.5-4B, a Brazilian-law (siglas) circuit exists and protecting 0.3% of the weights chosen by it recovers about a third of the OAB accuracy lost to int4 group-wise quantization (E16, E18); circuits of other domains and a non-legal Portuguese sigla circuit give no comparable gain (E19, E20), so the gain is not explained by language or by the sigla format (one seed, supportive evidence).
+- On Qwen3.5-4B, a Brazilian-law (siglas) circuit exists and protecting 0.3% of the weights chosen by it recovers about a third of the OAB accuracy lost to int4 group-wise quantization (E16, E18); circuits of other domains and a non-legal Portuguese sigla circuit give no comparable gain (E19, E20), so under RTN the gain is not explained by language or by the sigla format (one seed, supportive evidence). **E21 and E22 weaken this**: on Portuguese MMMLU the circuit helps law and non-law alike and random sets match it, and under GPTQ protection is indistinguishable from uniform; rounding noise of about ±6 points was never sampled (D9).
+- Clipping in the group-wise grid is the largest improvement measured so far on the quantizer side (GPTQ int3 NLL gap to fp16 0.18 to 0.07, E23).
 
 **What it cannot claim:**
 - That a domain-specialization score improves bit allocation; every test of that came back null or dose-explained (E2, E4, E7, E11–E13).
 - That persona or knowledge sub-networks are separable by unit: the circuits are strongly shared at the granularity tested.
 - Any inference speedup: all quantization here is simulated on dequantized weights.
+- That the law circuit is law-specific (E21) or that circuit protection adds anything on top of GPTQ (E22); the protection effect of E18 to E20 may be rounding noise.
 
 **Costs:** several experiments need a GPU machine (`maidai`); `outputs/` is gitignored, so results live only in local and remote `outputs/` directories and in `docs/method.pdf`.
 
 ## 5. Threats to validity (apply to the whole record)
 
+- **Rounding noise:** letter accuracy of equivalent quantized models varies by about ±6 points (E22); intervals over questions do not cover it, so E18 to E20 are single-realization results.
 - One model per experiment, one persona trait, one seed; small fact sets (27, 14, 26 held-out prompts per domain) and no confidence intervals in E10–E13.
 - Metric mismatch: the measured table and E13's NLL score optimize text NLL, while the goal is a target-domain behaviour; the table's text matches the evaluation text distribution (different lines).
 - Random controls match unit size class and (where stated) dose, but not depth or position.
@@ -205,6 +230,9 @@ and 6 full-attention) on an RTX 3090 (`maidai`) for the persona, circuit and all
 3. **Tail-conditioned statistics.** Test whether a `V` weighted toward high-activation tokens makes `D` rank layers better (Spearman against the measured table).
 4. **More statistical power:** larger fact sets, paired intervals for E10–E13.
 5. **Replication:** a second trait (honesty needs prompts written first; the `matching` label of `h_test_infer.csv` appears to mark the dishonest answer) and a second model.
+
+8. **New evaluation protocol (D9):** score each question under the four cyclic permutations of the options, use the probability of the correct letter normalized over A to D, KL and flip rate against the fp16 model, perplexity on held-out Portuguese legal text, several calibration draws per condition and a bootstrap over questions and realizations; make Hessian accumulation deterministic (fp64, no TF32).
+9. **Pending runs:** the rest of `scripts/quant_suite.py` (cal, protect with replicates, soft, mixed, lowrank) and `scripts/baselines.py` (RTN protection); vendor or pin the reference GPTQ code (`third_party/gptq_ref`, only on `maidai`); export to a real packed format for speed claims.
 
 ## 8. Reproduction pointers
 

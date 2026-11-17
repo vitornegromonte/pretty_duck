@@ -188,40 +188,26 @@ only as stronger interventions; nothing is stored in those formats.
 
 ## Findings so far (measured; see `docs/method.pdf`)
 
-All of this is one model per experiment (SmolLM-135M for statistics, plans and
-mean ablation; Qwen3.5-0.8B for the persona experiments), one trait, one seed.
+Current method: find the sparse circuit a domain's knowledge depends on by minimal-pair patching, validate it
+on held-out facts, and protect its weight columns at full precision while the rest is quantized group-wise at a
+low bit width. Twenty experiments (E1 to E20) are summarized in Section "Summary of the experiments" of
+`docs/method.pdf` and recorded with numbers and caveats in
+`docs/adr/0001-domain-aware-quantization-experiment-record.md`.
 
-* **Block and row-group signals are too weak to change a plan.** Math-vs-law
-  error and importance rank correlations over blocks are 0.995-0.996; target-anchored
-  `S_T` is reproducible across calibration halves (split-half 0.91-0.93) but its
-  spread is small (std 0.02-0.03), and error-only plans for a math vs a law
-  target differ in 2/210 blocks (22/2430 row groups).
-* **Per input channel the signal is wider** (std 0.20, 20% of channels with
-  |S_T| > 0.25, split-half 0.84).
-* **Mean-ablation selectivity is explained by dose.** A channel set chosen by
-  contrast looks selective (damage ratio 1.6-2.5x), but sets matched on the
-  perturbation energy reproduce it (gap within +-0.012 nats, inside the control spread).
-* **Persona prompts move the answer margin, mostly through word overlap.**
-  The seek-minus-reject margin shift on the 200 wealth questions is +2.82 nats
-  for Qwen3.5-0.8B; shuffled-word prompts give +1.95 and unrelated prompts +0.91.
-  SmolLM-135M responds only to word overlap (shuffled +0.97 vs real +0.83).
-  The answer *choices* stay near chance under every prompt.
-* **A standardized-mean-difference selector (`zdiff`) finds channels that are
-  sufficient and necessary for the shift** (5% of channels: restores 0.84 vs 0.18
-  for random, destroys 0.80 vs 0.15), at random level on the unrelated pair, and
-  with a paired real-minus-shuffled gain of +1.11 [0.85, 1.37] nats. The rank
-  contrast `tarc` also restores the unrelated pair, so it is not persona-specific.
-* **That does not become a quantization signal.** Quantizing the selected columns
-  at 3-4 bits leaves the persona shift intact, like random columns of the same
-  dose; only 2-bit shows a hint, inside the noise.
-
-The full record of what was tested, the decisions it supports and the open questions is in
-`docs/adr/0001-domain-aware-quantization-experiment-record.md`; the circuit-level, measured-sensitivity and
-equal-bytes results are in Appendix B of `docs/method.pdf`.
-
-Not shown: factual-knowledge sub-networks, other traits (the honesty split has no
-defined prompts), other models or seeds. Patching covers the question and answer
-tokens, so it shows where an effect is expressed, not where it is stored.
+* **What works.**
+  * Minimal-pair patching finds circuits of about 1% of the units that restore (and, removed, destroy) most of a
+    domain's answer logit difference on held-out facts (Qwen3.5-4B, legal siglas: 0.74 with 8 of 5,504 units).
+  * At neuron level the MLP part of a circuit is specific to its domain; attention heads are shared.
+  * A directly measured per-layer sensitivity table is cheap, roughly additive and the best allocation signal found.
+  * Under group-wise int4 (Qwen3.5-4B), protecting 0.30% of the weights chosen by the Brazilian-law circuit
+    recovers about a third of the OAB accuracy loss (+3.2 points [+1.5, +4.8]); circuits of other domains, a
+    non-legal Portuguese circuit, dose-based, activation-based and random choices do not.
+* **What did not.** A domain-contrast score (TARC) does not change a bit allocation; mean-ablation selectivity is
+  explained by perturbation dose; the diagonal error `D` is uncorrelated with the measured damage per layer;
+  quantizing persona-selected channels at 3-4 bits is no worse than random channels; no method helps at int3 or int2.
+* **Limits.** One model family, one seed, small fact sets (13-15 validation pairs for the legal siglas, which are an
+  unreviewed draft in `docs/revisao_juridica/`), intervals over questions only, simulated quantization (no speedup).
+  The legal circuit is the best of eight protected sets at each size, which is supportive, not conclusive.
 
 ## Limitations
 

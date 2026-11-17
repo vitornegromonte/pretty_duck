@@ -14,7 +14,7 @@
 \newcommand{\med}{\operatorname{median}}
 \newcommand{\code}[1]{\texttt{#1}}
 
-\title{Domain-aware heterogeneous quantization\\and causal sub-network probes}
+\title{Causal circuit discovery for domain-aware\\low-bit quantization}
 \author{\code{pretty\_duck}, branch \code{feature/domain-compression}}
 \date{}
 
@@ -22,40 +22,91 @@
 \maketitle
 
 \begin{abstract}
-We describe a pipeline that (i) collects per-domain activation statistics of a language model,
-(ii) plans a heterogeneous quantization of its linear layers under a byte budget, and
-(iii) writes the plan as real packed weights with a measured manifest. On top of the
-statistics we add causal probes (ablation and minimal-pair activation patching) that ask whether
-channels selected by a domain contrast are \emph{used} by the model, rather than merely more
-active on that domain. The results so far are mixed and are reported as measured. At block and
-row-group granularity the domain signal is too weak to change an allocation. Per input channel
-it is reproducible, but a mean-ablation effect that looks selective is fully explained by the
-size of the perturbation. On Persona-style prompt pairs, however, a mean-difference channel
-selector finds channels that are both sufficient and necessary for the prompt-induced margin
-shift, beyond random and beyond a lexical control. Quantizing those channels at 3--4 bits does not
-damage that behavior more than quantizing random channels of the same cost.
+We describe a forward-only method that finds, by causal patching, the sparse set of components a language
+model uses for one domain of knowledge, and protects exactly those components at full precision while
+everything else is quantized at a low bit width. A circuit is built from attention heads and MLP neurons
+scored on minimal pairs (the same prompt with only the subject swapped), and is validated on facts that were
+not used to choose it. On Qwen3.5-4B, a circuit for Brazilian-law sigla expansion reaches sufficiency 0.74 with 8 of
+5{,}504 units, and protecting 0.30\% of the weights chosen by it recovers about a third of the accuracy that
+group-wise int4 quantization loses on OAB bar-exam questions (+3.2 points, 95\% interval $[+1.5,+4.8]$). Circuits of
+other domains, a non-legal circuit with the same language and task format, and choices by quantization error or
+by activation magnitude do not give this gain. Along the way, several natural ideas failed and are reported as
+negative results: a domain-contrast score does not change a bit allocation, mean ablation looks selective only because of
+the size of the perturbation, and the diagonal error ranks layers badly while a directly measured sensitivity table
+works well. At neuron level the MLP part of a circuit is specific to its domain, while attention heads are shared.
+The evidence comes from one model family, small fact sets and a single seed, and is supportive rather than conclusive.
 \end{abstract}
 
 \section{Overview}
 
-The pipeline has three stages (Figure~\ref{fig:pipeline}). This document covers the first two and
-the converter's storage format; the final inference pipeline is out of scope. No gradients, auxiliary
-networks or fine-tuning are used anywhere, and every probe is forward-only.
+The working method has three steps (Figure~\ref{fig:pipeline}): \emph{measure} how much each part of the model is
+hurt by quantization, \emph{locate} the components that a domain's knowledge depends on by causal patching, and
+\emph{protect} those components at full precision while the rest is quantized at a low bit width. Every step is
+forward-only: no gradients, auxiliary networks or fine-tuning, and the weights are restored after every intervention.
+Quantization is simulated on dequantized weights, so no inference speedup is claimed, and sizes are counted with exact byte
+formulas. Earlier parts of the study (a diagonal-error planner with a contrast signal, and mean ablation) are kept as
+baselines and negative results (Sections~\ref{sec:stats}--\ref{sec:probes}).
 
 \begin{figure}[h]
 \centering
 \begin{tikzpicture}[
-  box/.style={draw, rounded corners=2pt, align=center, minimum width=4.1cm, minimum height=1.5cm, font=\small},
+  box/.style={draw, rounded corners=2pt, align=center, minimum width=4.1cm, minimum height=1.6cm, font=\small},
   arr/.style={-{Stealth[length=2.2mm]}, thick}]
-  \node[box] (a) {\textbf{Persona analysis}\\statistics per domain,\\candidate sets,\\causal interventions};
-  \node[box, right=0.9cm of a] (b) {\textbf{Quantization planner}\\sensitivity per format,\\byte budget,\\heterogeneous allocation};
-  \node[box, right=0.9cm of b] (c) {\textbf{Checkpoint converter}\\real packed weights,\\scales, metadata,\\manifest};
+  \node[box] (a) {\textbf{Measure}\\activation statistics,\\measured per-layer\\sensitivity};
+  \node[box, right=0.9cm of a] (b) {\textbf{Locate}\\minimal-pair patching,\\sparse circuits validated\\on held-out facts};
+  \node[box, right=0.9cm of b] (c) {\textbf{Protect}\\group-wise low-bit\\quantization, circuit columns\\kept at full precision};
   \draw[arr] (a) -- (b); \draw[arr] (b) -- (c);
 \end{tikzpicture}
-\caption{The three stages. The causal probes of Section~\ref{sec:probes} belong to the first stage;
-only candidate sets that survive them would be passed to the planner.}
+\caption{The method. Each step is evaluated against controls of the same size (Section~\ref{sec:method}).}
 \label{fig:pipeline}
 \end{figure}
+
+\section{The current method}
+\label{sec:method}
+
+\subsection{Task: entity-swap minimal pairs}
+A relation has a prompt template $T(s)$ and facts $(s_i,a_i)$. A \emph{minimal pair} is a clean fact $(s_c,a_c)$ and a corrupt one
+$(s_k,a_k)$ whose prompts have the same number of tokens and whose answers start with different tokens. The metric is the logit
+difference at the last position,
+\begin{equation}
+\mathrm{LD}=\mathrm{logit}[a_c]-\mathrm{logit}[a_k].
+\end{equation}
+Only facts the model answers correctly (its top-1 next token is the first answer token) are used, and a fixed two-example prefix whose subjects are
+not in the fact list makes the answer format unambiguous. The facts are split in two halves: units are scored on the first and circuits validated on
+the second. Relations used: capitals, chemical-element symbols, English$\to$French words, and Brazilian-law sigla expansions (\emph{in direito
+brasileiro, a sigla STF significa} $\to$ ``Supremo''), plus a non-legal control with the same Portuguese template and format.
+
+\subsection{Units, scan and circuits}
+A \emph{unit} is a slice of the input channels of a residual-stream write projection (\code{o\_proj}, \code{out\_proj}, \code{down\_proj}): an attention head,
+a group of 64 MLP neurons, or a single neuron. The \emph{sufficiency} of a set of units is the fraction of the clean-minus-corrupt $\mathrm{LD}$ restored when the clean
+activations of those units are patched into the corrupt run at every position,
+\begin{equation}
+\mathrm{suff}=\frac{\sum_q\bigl(\mathrm{LD}^{\mathrm{patched}}_q-\mathrm{LD}^{\mathrm{corrupt}}_q\bigr)}{\sum_q\bigl(\mathrm{LD}^{\mathrm{clean}}_q-\mathrm{LD}^{\mathrm{corrupt}}_q\bigr)},
+\end{equation}
+and \emph{necessity} swaps the roles (corrupt activations into the clean run, fraction destroyed). Each unit is scored alone on the discovery half; to make a
+scan of tens of thousands of neurons affordable, every sequence of a batch carries a different patched neuron (about 84 neurons per second on a 0.8B model).
+The circuit $C_k$ is the $k$ units with the highest single-unit sufficiency. It is then evaluated \emph{jointly} on the validation half against random sets
+of the same size classes. Patching all units gives exactly 1 at the read position, a built-in reference. Interventions are forward hooks and weights are restored on exit.
+
+\subsection{Shared core and domain-specific periphery}
+To test whether circuits separate by domain, the circuit of domain $A$ is evaluated on the pairs of domain $B$. The \emph{core} is the set of units in the top $m$ of at least two
+domains. Three variants of each circuit are compared: the full top-$k$, the top-$k$ after removing the core, and the top-$k$ after removing every unit in the top lists of the other domains
+(specific only). Neuron-level scans refine the unit granularity inside the layers where circuits sit.
+
+\subsection{Protected low-bit quantization}
+A weight matrix $W\in\mathbb{R}^{o\times i}$ is quantized group-wise: the columns of each row are split in blocks $b$ of 64, and
+\begin{equation}
+\hat W_{rj}=s_{rb}\,\operatorname{clip}\bigl(\operatorname{round}(W_{rj}/s_{rb}),-2^{n-1},2^{n-1}-1\bigr),\qquad s_{rb}=\frac{\max_{j\in b}|W_{rj}|}{2^{n-1}-1},
+\end{equation}
+for $n$ bits. Every Linear layer of the text tower is quantized this way, except that the columns of write projections belonging to the protected units keep their original values; the
+scales of such a layer are computed over its unprotected columns only, as a real mixed-precision layout would. The extra cost of a protected unit with $w$ columns in a matrix with $o$ rows is
+$o\,w\,(16-n_{\mathrm{eff}})$ bits, where $n_{\mathrm{eff}}$ is the average bits of an unprotected weight including scales; for Qwen3.5-4B, 32 units are 0.30\% of the weights and 128 units 1.08\%.
+
+\subsection{Evaluation protocol}
+The downstream metric is accuracy on bar-exam questions (OAB, four options, scored by answer letter; chance 25\%), on the same 600 seeded questions in every condition so that comparisons are
+paired question by question, with a percentile bootstrap over questions. Protection is judged only at a bit width where uniform quantization loses accuracy without collapsing (int4 with 64-column groups on Qwen3.5-4B:
+43.8\% in fp16, 35.0\% uniform; int3 and int2 are at chance and uninformative). Each protected set has the same number of weights as the circuit and is compared with: class-matched random units (3 draws), units with the highest
+quantization dose $\sum E^2V$, the columns of highest mean activation per layer (an AWQ-like choice), the circuits of other domains, and a non-legal circuit in the same language and task format.
 
 \section{Statistics and local quantities}
 \label{sec:stats}
@@ -76,8 +127,11 @@ where the last step assumes uncorrelated input channels. $D$ is a local prioriti
 the final loss: errors in different layers are not equally harmful, and the sum over layers is not the
 loss increase.
 
-\section{Quantization planner}
+\section{Diagonal-error planner (baseline)}
 \label{sec:planner}
+
+This planner, with the contrast signals below, is kept as a baseline. Appendix~\ref{app:circuits} shows that the diagonal error ranks layers badly and that a measured per-layer table does much better;
+the current method (Section~\ref{sec:method}) uses measured sensitivity and circuit-guided protection instead.
 
 \paragraph{Formats and real bytes.}
 Four portable formats are supported, all quantizing each output row independently:
@@ -114,7 +168,7 @@ $\rho\leftarrow\rho\,(1+\lambda\max(S_T,0))$, so $\lambda$ is only a strength. B
 prioritization: the error term already contains the domain through $V_{g,T}$, and only evaluation can say whether
 the contrast adds anything.
 
-\section{Causal probes}
+\section{Earlier causal probes}
 \label{sec:probes}
 
 Statistics say a channel is more active on a domain; they do not say the model needs it. The probes intervene.
@@ -179,6 +233,9 @@ mathematics (92 samples), law (194), biology (80), computer science (42), humani
 Persona: the 623 rows of \code{wealth\_train.csv} give seek (matching) and reject (not-matching) texts; evaluation uses the 200 questions of \code{wealth\_test\_infer.csv}, scored with the original wealth prompts.
 \item \textbf{Seeds and sizes.} Seed 42 for sample selection; 5 draws for each random control; bootstrap intervals use 500--2000 resamples; mean ablation uses 30 held-out lines per domain.
 \end{itemize}
+
+Brazilian-law experiments use Qwen3.5-4B (about 9~GB in fp16) and \code{eduagarcia/oab\_exams} (2{,}210 four-option OAB questions, no license declared in its card; 600 seeded questions per evaluation). The legal facts are a 60-row draft sheet
+(49 siglas, 5 LIMPE principles, 6 TRF seats) that a jurist has not reviewed yet; a non-legal control sheet has 54 Portuguese siglas of universities, research bodies, companies and international organizations.
 
 \section{Results}
 
@@ -310,21 +367,122 @@ int2 & 20\% & 0.21 & 0.46 & 0.56 & 0.41\\
 \end{table}
 At 3 and 4 bits there is no effect: the persona shift survives quantizing the persona columns entirely. At 2 bits \emph{zdiff} loses somewhat more than random in both settings, but the random draws vary too much to call it a result; the importance set loses a lot, at ten times the dose.
 
+\section{Circuit-guided protection for Brazilian law (Qwen3.5-4B)}
+\label{sec:law}
+
+\subsection{What the models know}
+On 800 sampled OAB questions the 0.8B model scores 36.9\% and the 4B 42.4\% (chance 25\%). With the two-example prefix the 4B answers 26 of the 31 legal siglas that survive tokenization and the equal-length filter (the 0.8B 15), against
+8 without examples. LIMPE principles (0 of 5) and TRF seats (1 of 6) are not known by either model. The 4B is therefore the smallest model with a usable legal domain, with 13 pairs per half.
+
+\subsection{Circuits and their entanglement}
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lccccc}
+\toprule
+domain & validation pairs & best single unit & suff.\ $k{=}8$ & suff.\ $k{=}32$ & suff.\ $k{=}128$\\
+\midrule
+capitals & 38 & 0.40 & 0.91 & 0.94 & 0.98\\
+elements & 14 & 0.34 & 0.72 & 0.85 & 0.99\\
+French & 27 & 0.19 & 0.55 & 0.88 & 0.99\\
+legal siglas & 13 & 0.30 & 0.74 & 0.86 & 0.98\\
+general siglas (control) & 15 & 0.41 & 0.70 & 0.83 & 0.96\\
+\bottomrule
+\end{tabular}
+\caption{Held-out sufficiency of the top-$k$ of 5{,}504 units (896 heads, 4{,}608 MLP groups). Random sets of the same size classes give about 0.00 to 0.02. Heads dominate small circuits; for the legal domain MLP groups enter from $k{=}16$ (3), 12 at $k{=}32$ and 67 at $k{=}128$.}
+\label{tab:c4b}
+\end{table}
+The four main domains are less entangled in the 4B than in the 0.8B (Appendix~\ref{app:circuits}). A core of 15 units (in the top 32 of at least two domains; 1 in all four) alone gives necessity $0.75$, $0.68$, $0.66$ and $0.78$ on capitals, elements, French and law.
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lcccc}
+\toprule
+$k=64$ & capitals & elements & French & legal siglas\\
+\midrule
+full circuit & 0.97 / 0.52 & 0.97 / 0.78 & 0.92 / 0.60 & 0.92 / 0.53\\
+core removed & 0.76 / 0.11 & 0.72 / 0.21 & 0.30 / 0.12 & 0.62 / 0.14\\
+specific units only & 0.74 / 0.08 & 0.56 / 0.11 & 0.23 / 0.08 & 0.51 / 0.06\\
+\bottomrule
+\end{tabular}
+\caption{Necessity of a domain's circuit on its own domain / mean of the three others (held-out pairs; random sets $0.00$--$0.08$). No intervals; the legal and elements sets have 13--14 pairs.}
+\label{tab:e4b}
+\end{table}
+
+\subsection{Protection under group-wise int4}
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lcc}
+\toprule
+protected set (same weights) & 32 units (0.30\%) & 128 units (1.08\%)\\
+\midrule
+none (uniform int4) & \multicolumn{2}{c}{35.0\% (fp16: 43.8\%)}\\
+\textbf{legal circuit} & \textbf{38.2\% (+3.2 [+1.5, +4.8])} & \textbf{37.3\% (+2.3 [+0.8, +4.0])}\\
+highest-dose units & 35.2\% (+0.2 [$-$0.8, +1.3]) & 36.7\% (+1.7 [+0.5, +3.0])\\
+highest-activation columns & 37.7\% (+2.7 [0.0, +5.2]) & 34.2\% ($-$0.8 [$-$3.0, +1.2])\\
+random units (3 draws) & 35.0--36.2\% & 35.2--36.7\%\\
+capitals circuit & 34.8\% ($-$0.2) & 35.8\% (+0.8)\\
+elements circuit & 36.7\% (+1.7 [+0.7, +2.8]) & 32.8\% ($-$2.2 [$-$3.8, $-$0.5])\\
+French circuit & 34.0\% ($-$1.0) & 34.2\% ($-$0.8)\\
+\textbf{general-siglas circuit (control)} & 35.2\% (+0.2 [$-$1.2, +1.7]) & 32.3\% ($-$2.7 [$-$4.3, $-$1.0])\\
+\bottomrule
+\end{tabular}
+\caption{OAB accuracy on 600 questions and, in brackets, the gain in points over uniform int4 with a 95\% interval over questions (paired).}
+\label{tab:protect4b}
+\end{table}
+The legal circuit is the only protected set with a significant gain at both sizes: it beats each of the other circuits by 1.5 to 4.5 points, the mean of the three English-prompt circuits by $+3.0$ $[+1.6,+4.6]$ (32 units) and $+3.1$ $[+1.4,+4.8]$
+(128 units), and the non-legal Portuguese control by $+3.0$ $[+1.3,+4.7]$ and $+5.0$ $[+3.0,+7.0]$. Among the eight protected sets of each size (the legal circuit, four control circuits, three random draws) the legal circuit is the best at both,
+which by chance alone would happen with probability $1/8$ per size. Protecting just any circuit does not help (some hurt, down to $-2.7$ points), so which units are protected matters, and neither language nor the sigla format explains the gain.
+At int3 and int2 all conditions are at chance and no method differs from random; the sigla log-probability is unaffected at int4.
+
+\section{Summary of the experiments}
+\label{sec:summary}
+Table~\ref{tab:summary} lists every experiment with its verdict: E1 to E8 cover the baseline planner and the earlier probes, E9 to E20 the circuit-level work behind the current method.
+\begin{table}[h]
+\centering\footnotesize
+\begin{tabular}{@{}rp{5.3cm}p{8.2cm}@{}}
+\toprule
+ & experiment & verdict\\
+\midrule
+E1 & block-level domain signal (SmolLM-135M) & domains look almost identical (rank correlation 0.995)\\
+E2 & target-anchored contrast (TARC), row groups & reproducible but small; plans barely depend on the target\\
+E3 & per-channel signal & wider (std 0.20) and reproducible (0.84)\\
+E4 & mean ablation with dose control & selectivity explained by perturbation dose\\
+E5 & persona prompt moves the margin? & shift mostly lexical; SmolLM responds only to words\\
+E6 & minimal-pair patching, persona (Qwen3.5-0.8B) & zdiff channels sufficient (0.84) and necessary (0.80), persona-specific\\
+E7 & quantizing the persona channels & no effect at 3--4 bits\\
+E8 & measured sensitivity vs diagonal $D$ & $D$ uncorrelated with measured damage; measured table additive\\
+E9 & circuits for factual recall (0.8B) & about 1\% of units carry the effect, validated on held-out facts\\
+E10 & entanglement (0.8B) & shared core of 18 units plus a domain-specific periphery\\
+E11 & quantizing circuits at equal dose & fragile at 2 bits, generally critical, not recall-specific\\
+E12 & protection in per-row int quantization & circuit beats random, not a dose-based choice\\
+E13 & allocation at equal bytes (nf4 baseline) & measured table best (61\% of the damage recovered at +10\% bytes), $D$ about random\\
+E14 & neuron-level re-test (0.8B) & MLP neurons domain-specific and almost disjoint; heads shared\\
+E15 & Brazilian-law knowledge (0.8B, 4B) & 4B knows 26 of 31 legal siglas with few-shot; OAB 42.4\%\\
+E16 & circuits on the 4B including law & sparse and validated (legal: 0.74 with 8 units); less compact than the 0.8B\\
+E17 & entanglement on the 4B & less entangled than the 0.8B; law has its own periphery\\
+E18 & protecting the legal circuit, group-wise int4 & +3.2 and +2.3 OAB points over uniform\\
+E19 & protecting other-domain circuits & no comparable gain\\
+E20 & non-legal Portuguese sigla circuit & no gain; gain not explained by language or format\\
+\bottomrule
+\end{tabular}
+\caption{Experiments E1--E20 and what each shows; the full record with numbers and caveats is in \code{docs/adr/0001-domain-aware-quantization-experiment-record.md}.}
+\label{tab:summary}
+\end{table}
+
 \section{Discussion and limitations}
 \paragraph{What the evidence supports.}
-(i) Domain-contrast signals are real but small at block and row-group granularity and do not change a size-matched allocation. (ii) Mean ablation
-with a domain-contrast set looks selective, but an equal-dose control reproduces it. (iii) On minimal pairs, the standardized-mean-difference set (\emph{zdiff}) is
-sufficient and necessary for the prompt-induced margin shift, specific to the persona content over an unrelated pair, and partly beyond word overlap. (iv) That does not translate into a
-quantization signal at 3--4 bits. Appendix~\ref{app:circuits} extends the study to measured sensitivity, circuits and end-to-end allocation, and qualifies this last point.
+(i) Minimal-pair patching finds sparse, jointly acting circuits for a body of knowledge: about 1\% of the units, validated on facts not used to choose them. (ii) At neuron level the MLP part of a circuit is specific to its domain and nearly disjoint across
+domains, while attention heads form the shared part; at group level a small core of 15 to 18 units is shared and a periphery is domain-specific. (iii) A directly measured per-layer sensitivity table is cheap, roughly additive and a much better allocation
+signal than the diagonal error. (iv) In the one regime where group-wise quantization hurts without collapsing (int4, 64-column groups), protecting 0.30\% of the weights chosen by the Brazilian-law circuit recovers about a third of the OAB accuracy loss, and
+random sets, dose-based sets, other-domain circuits and a non-legal circuit in the same language and format do not. (v) Domain-contrast scores, mean ablation and the diagonal error did not work.
 
 \paragraph{What it does not show.}
 \begin{itemize}\setlength\itemsep{0pt}
-\item One model per experiment, one trait (wealth), one seed; channels are chosen on the training split and tested on held-out questions.
-\item The effect is a log-probability shift; the model's choices stay near chance, and about two thirds of the shift is word-level priming.
-\item Patching covers the question and answer tokens, including the scored tokens, so it shows where an effect is expressed, not where a persona is stored.
-\item Only the diagonal approximation of quantization error is used; bit widths below 4 are simulations; per-row scales in the column intervention use only the selected columns.
-\item Factual knowledge was not tested. A knowledge claim would need a model that answers above chance, a knowledge metric (logit difference of correct and incorrect answers), minimal pairs with an entity swapped, and a double dissociation across domains.
-\item The honesty split is not used because its \code{matching} label appears to mark the dishonest answer and the original code defines no honesty prompts.
+\item One model family (Qwen3.5) and one seed. The legal evidence rests on 13 validation pairs of a single narrow relation, sigla expansion, which measures memorized official names rather than legal reasoning; a jurist has not reviewed the facts.
+\item Intervals cover questions, not the choice of units. The legal circuit being the best of eight protected sets at each size is supportive (probability $1/8$ per size by chance), not conclusive.
+\item That the circuit transfers from siglas to OAB questions is an empirical finding that is not explained. No non-law Portuguese benchmark has been tried, so it is not known whether the protection helps only law.
+\item No gain at 3 and 2 bits, a simulated quantizer (no stored format, no speedup), and no comparison yet with established methods such as GPTQ, AWQ or rotation-based quantization.
+\item The domain-specific MLP neurons are about 0.3\% of the weights, so domain-specific compression of them can move few bytes; their value is in protecting them. Heads are shared across domains.
+\item Patching shows where an effect is expressed, not where knowledge is stored. The persona results cover one trait and the honesty split is unused (its \code{matching} label appears to mark the dishonest answer and the original code defines no honesty prompts).
 \end{itemize}
 
 \section{Reproducing}
@@ -360,7 +518,30 @@ python scripts/persona_patch.py --model-path Qwen/Qwen3.5-0.8B \
 python scripts/persona_quant.py --model-path Qwen/Qwen3.5-0.8B \
     --stats stats_persona.pt --test T --out quant.json
 \end{verbatim}\end{small}
+Brazilian-law data, circuits and protection (Qwen3.5-4B; \code{M} is the model path):
+\begin{small}\begin{verbatim}
+python scripts/oab_prepare.py outputs/data/oab_exams/train.parquet \
+    outputs/data/oab_exams/oab_exams.jsonl
+python scripts/br_law_knowledge.py --model-path M \
+    --oab outputs/data/oab_exams/oab_exams.jsonl \
+    --facts docs/revisao_juridica/fatos_direito_br_rascunho.csv \
+    --few-shot --out knowledge.json
+python scripts/circuit_probe.py --model-path M \
+    --domains capitals,elements,french,direito_siglas \
+    --facts-csv docs/revisao_juridica/fatos_direito_br_rascunho.csv \
+    --csv-domain direito_siglas=siglas --no-quant \
+    --ks 8,16,32,64,128 --out probe.json
+python scripts/entanglement.py --model-path M --probe probe.json \
+    --ks 4,8,16,32,64 --core-k 32 --excl-k 64 --out entanglement.json
+python scripts/protect_law.py --model-path M --probe probe.json \
+    --stats stats.pt --oab outputs/data/oab_exams/oab_exams.jsonl \
+    --out protect.json
+python scripts/protect_law.py ... --bits 4 \
+    --controls capitals,elements,french --out controls.json
+\end{verbatim}\end{small}
+The non-legal control uses \code{docs/controles/fatos\_siglas\_gerais\_ptbr.csv} with \code{--csv-domain siglas\_gerais=siglas\_gerais} and is merged into the probe file before \code{protect\_law.py --controls siglas\_gerais}.
 
+\clearpage
 \appendix
 \section{Code map}
 \begin{center}\small
@@ -382,6 +563,9 @@ file & role\\
 \code{scripts/sensitivity.py}, \code{circuit\_probe.py} & measured table; circuit scan, quantization, additivity\\
 \code{scripts/entanglement.py}, \code{protect.py} & core and periphery; protection in whole-model quantization\\
 \code{scripts/alloc\_e2e.py} & allocation comparison at equal bytes\\
+\code{scripts/neuron\_scan.py} & single-neuron scan and neuron-level entanglement\\
+\code{scripts/protect\_law.py} & protected group-wise quantization on OAB, with controls\\
+\code{compress/oab.py}, \code{scripts/br\_law\_knowledge.py} & OAB loader, fact sheets, known-fact measurement\\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -556,14 +740,21 @@ diagonal error is informative per column and fails when compared across layers. 
 and $0.120$ (random, range $0.061$--$0.261$) against $0.127$ for uniform nf4; with 27, 14 and 26 prompts per domain most of these differences are within the spread of random draws, and the measured allocation, which optimizes text NLL,
 does not improve recall at budgets up to $+5\%$ (capitals $0.270$ against $0.099$ for nf4). The advantage on NLL is partly in-distribution, because the measured table was built on text from the same domains as the evaluation lines.
 
+\subsection{Neuron-level re-test}
+Every MLP neuron (input channel of \code{down\_proj}) of the 19 layers holding the group-level circuits of the 0.8B model was scored by batched single-neuron patching (68{,}096 neurons per domain), with heads kept at head level.
+Single neurons are weak (best 0.057, 0.032 and 0.036 for capitals, elements and French; only 103, 124 and 137 exceed 0.002) and almost disjoint across domains: the sets overlap in 6, 0 and 1 neurons against about 0.2 expected by chance (top-512
+overlap 77, 27 and 26, chance 3.9). Circuits made only of MLP neurons are domain-specific (necessity on the own domain / mean of the others, $k$ neurons): $0.55/0.15$, $0.58/0.11$, $0.29/0.06$ at $k=512$ and $0.69/0.27$, $0.68/0.19$, $0.49/0.18$ at $k=2048$,
+against $0.00$--$0.03$ for random neuron sets, but they carry only half to two thirds of the effect. Mixed circuits stay entangled because heads dominate them (27 of 32 units at $k=32$). Part of the earlier entanglement was therefore a granularity
+effect of grouping 64 neurons; attention heads are the shared part.
+
 \subsection{Reading}
 \begin{itemize}\setlength\itemsep{0pt}
-\item The diagonal $D$ is unreliable for comparing layers and is inverted by layer type; measured per-layer sensitivity is cheap, roughly additive, and the strongest allocation signal found, for the metric it was measured on.
-\item Factual recall depends on sparse circuits of about 1\% of the units, which are validated on held-out facts and necessary and sufficient, but largely shared across relations: a core of 18 units carries most of the effect in every domain, with a domain-specific periphery that is clean for capitals, moderate for French and thin for elements.
-\item Circuit-informed protection beats random protection and loses to dose-based and measured choices at equal bytes, so no domain-specific signal improves on domain-agnostic ones in these experiments.
-\item The next step suggested by these results is to measure $\Delta L$ on the target metric (the facts) and on a secondary text metric, and allocate under both constraints with a measured table.
+\item The diagonal $D$ is unreliable for comparing layers and is inverted by layer type; measured per-layer sensitivity is cheap, roughly additive and the strongest allocation signal for the metric it was measured on.
+\item Factual recall depends on sparse circuits of about 1\% of the units, validated on held-out facts. At group level a small core is shared across domains; at neuron level the MLP part is domain-specific and the heads are shared.
+\item In whole-model per-row quantization, circuit protection beat random sets but not a dose-based choice (the baseline there was crude); with group-wise quantization on the 4B the legal circuit is the only protected set with a significant gain (Section~\ref{sec:law}).
+\item Domain-contrast scoring, mean ablation and the diagonal error remain negative results.
 \end{itemize}
-Limitations: one model, small fact sets (no confidence intervals in the circuit and allocation runs), random controls matched on size class and dose but not on depth, and a crude per-row quantizer in the protection experiment.
+Limitations: one model family, small fact sets, intervals over questions only, random controls matched on size class and dose but not on depth, and a simulated quantizer.
 
 \begin{thebibliography}{9}\small
 \bibitem{wanda} M.~Sun, Z.~Liu, A.~Bair, J.~Z.~Kolter. A simple and effective pruning approach for large language models. 2023.

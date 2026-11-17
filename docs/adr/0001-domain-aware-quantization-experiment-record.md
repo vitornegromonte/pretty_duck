@@ -151,8 +151,13 @@ and 6 full-attention) on an RTX 3090 (`maidai`) for the persona, circuit and all
 - **Setup:** every Linear of the text tower fake-quantized with one scale per 64 columns (`fake_quant_group`), unit columns protected at fp16, 600 OAB questions identical across conditions (per-question results stored for paired comparison), 3 random draws, protected sets of 32 and 128 units (0.30% and 1.08% of the weights).
 - **Result:** fp16 43.8%; uniform int4 35.0%, int3 25.2%, int2 24.0% (chance), so only int4 is informative. At int4, gain in accuracy points over uniform (95% interval over questions): circuit +3.2 [+1.5, +4.8] at 32 units and +2.3 [+0.8, +4.0] at 128; highest-dose units +0.2 [−0.8, +1.3] and +1.7 [+0.5, +3.0]; highest-activation columns (AWQ-like) +2.7 [0.0, +5.2] and −0.8 [−3.0, +1.2]. Against the random sets (35.0 to 36.7%) the circuit gains +2.6 [+1.3, +4.1] and +1.7 [+0.3, +3.1]. At int3 and int2 no method beats random; the sigla log-probability is unaffected at int4.
 - **Verdict:** a small but consistent compression-side signal: protecting 0.3% of the weights recovers about a third of the OAB loss, and the circuit is the only method with a significant gain at both sizes. It is not shown to be law-specific (the circuit was found on siglas, the benchmark is OAB, and circuits were generally critical in E11). Intervals cover questions only, not the choice of units; one seed.
-- **Control (E19, pending when this was written):** protect the circuits of capitals, elements and French at the same sizes under the same int4 setup. If their gain on the OAB matches the law circuit's, the effect is general importance, not Brazilian law.
 - **Artifacts:** `scripts/protect_law.py`, `compress/protect.py` (`group`), `compress/quant_probe.py` (`fake_quant_group`), `outputs/protect_law_4b.json`.
+
+### E19 — Control: protect the circuits of other domains instead (Qwen3.5-4B, int4, group 64)
+- **Setup:** as E18 (same 600 OAB questions, verified identical), protecting the capitals, elements and French circuits at the same sizes (32 and 128 units, 0.28% to 1.00% of the weights).
+- **Result (OAB accuracy; uniform int4 35.0%, law circuit 38.2% and 37.3%):** capitals 34.8% / 35.8%, elements 36.7% / 32.8%, French 34.0% / 34.2% (k=32 / k=128). Against uniform: -0.2, +1.7 [+0.7, +2.8], -1.0 at k=32 and +0.8, -2.2 [-3.8, -0.5], -0.8 at k=128. The law circuit beats each control by 1.5 to 4.5 points (the interval excludes zero in 5 of 6 comparisons; capitals at k=128 is -1.5 [-3.2, +0.2] against it) and the mean of the three by +3.0 [+1.6, +4.6] (k=32) and +3.1 [+1.4, +4.8] (k=128).
+- **Verdict:** protecting just any circuit does not help; the gain of E18 belongs to the law circuit. **Confound:** the law prompts are in Portuguese and the OAB is in Portuguese, while all three controls use English prompts, so the gain may reflect Portuguese processing rather than law. The deciding control is a circuit for non-legal facts with Portuguese prompts. Intervals cover questions only, one seed.
+- **Artifacts:** `scripts/protect_law.py --controls`, `outputs/protect_law_4b_controls.json`.
 
 ## 4. Consequences
 
@@ -160,7 +165,7 @@ and 6 full-attention) on an RTX 3090 (`maidai`) for the persona, circuit and all
 - Causal channel sets for a behaviour can be found by minimal-pair patching and validated against dose-matched and lexical controls (E6).
 - Factual recall sits in sparse cross-layer circuits (~1% of units). At neuron level the MLP part is domain-specific and nearly disjoint across domains, while attention heads form a shared part that carries the rest (E9, E10, E14).
 - Measured per-layer sensitivity is roughly additive and a much better allocation signal than the diagonal `D` (E8, E13).
-- On Qwen3.5-4B, a Brazilian-law (siglas) circuit exists and protecting 0.3% of the weights chosen by it recovers about a third of the OAB accuracy lost to int4 group-wise quantization (E16, E18), pending the specificity control.
+- On Qwen3.5-4B, a Brazilian-law (siglas) circuit exists and protecting 0.3% of the weights chosen by it recovers about a third of the OAB accuracy lost to int4 group-wise quantization (E16, E18); circuits of other domains give no comparable gain (E19), but the law prompts are in Portuguese, so language is an unresolved confound.
 
 **What it cannot claim:**
 - That a domain-specialization score improves bit allocation; every test of that came back null or dose-explained (E2, E4, E7, E11–E13).
@@ -187,6 +192,7 @@ and 6 full-attention) on an RTX 3090 (`maidai`) for the persona, circuit and all
 
 ## 7. Open questions and next steps (Proposed)
 
+0. **Portuguese control for E18/E19:** build a circuit from non-legal facts with Portuguese prompts (for example chemical-element symbols in Portuguese) and protect it under the same int4 setup; also test a non-law Portuguese benchmark. Colleagues were asked for Portuguese fact sets.
 1. **Neuron-level protection at equal bytes** (follow-up to E14, which answered the granularity question): protect the neuron-level MLP circuit (about 2,000 neurons, roughly 1% extra bytes at fp16) plus the shared heads in a whole-model nf4 plan and compare with dose-based and measured-table protection as in E13. The earlier suggestion was motivated by Goodfire's "Neurons as an Interpretable Basis" (https://www.goodfire.com/research/neurons-as-an-interpretable-basis, Qwen3.6-35B-A3B, one model), read through a summarizing tool without its appendix, so its numbers are unverified; it has no quantization or weight-pruning results.
 2. **A damage metric with less noise.** Build the measured table with KL divergence to the base model's output distribution, on target-domain facts and on secondary text, and allocate under two constraints (`ΔL_T ≤ ε_T`, `ΔL_S ≤ ε_S`) as proposed in the project notes.
 3. **Tail-conditioned statistics.** Test whether a `V` weighted toward high-activation tokens makes `D` rank layers better (Spearman against the measured table).

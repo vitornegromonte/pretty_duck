@@ -16,8 +16,10 @@ from .quant_probe import fake_quant, fake_quant_group
 
 class MixedQuant:
     def __init__(self, model: torch.nn.Module, layers: list[str], bits: int,
-                 protect: dict[str, torch.Tensor] | None = None, group: int | None = None):
+                 protect: dict[str, torch.Tensor] | None = None, group: int | None = None,
+                 offload: bool = False):
         self.model, self.layers, self.bits, self.group = model, layers, bits, group
+        self.offload = offload  # keep the saved originals on the host (small GPUs)
         self.protect = protect or {}
         self.total_weights = 0
         self.protected_weights = 0
@@ -35,7 +37,7 @@ class MixedQuant:
                 if not isinstance(module, torch.nn.Linear):
                     raise KeyError(f"layer {name!r} is not an nn.Linear in the model")
                 w = module.weight.data
-                self._saved.append((module, w.clone()))
+                self._saved.append((module, w.cpu().clone() if self.offload else w.clone()))
                 self.total_weights += w.numel()
                 keep = self.protect.get(name)
                 if keep is None or keep.numel() == 0:

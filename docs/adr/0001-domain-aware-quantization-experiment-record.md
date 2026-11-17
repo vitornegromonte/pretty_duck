@@ -159,13 +159,20 @@ and 6 full-attention) on an RTX 3090 (`maidai`) for the persona, circuit and all
 - **Verdict:** protecting just any circuit does not help; the gain of E18 belongs to the law circuit. **Confound:** the law prompts are in Portuguese and the OAB is in Portuguese, while all three controls use English prompts, so the gain may reflect Portuguese processing rather than law. The deciding control is a circuit for non-legal facts with Portuguese prompts. Intervals cover questions only, one seed.
 - **Artifacts:** `scripts/protect_law.py --controls`, `outputs/protect_law_4b_controls.json`.
 
+### E20 — Portuguese non-legal control: general siglas (Qwen3.5-4B, int4, group 64)
+- **Setup:** 54 non-legal Brazilian and international sigla expansions (universities, research bodies, companies, UN agencies) in `docs/controles/fatos_siglas_gerais_ptbr.csv`, same Portuguese template and few-shot format as the legal siglas (prefix examples IFPE and FINEP, not in the list). The 4B knows 29 of them (14/15 pairs); its circuit has held-out sufficiency 0.70 (k=8), 0.83 (k=32), 0.96 (k=128) against about 0 for random sets, with 19 heads and 13 MLP groups at k=32. Its units were then protected under the same int4 setup and 600 OAB questions as E18.
+- **Result:** OAB accuracy 35.2% (k=32) and 32.3% (k=128), against 35.0% for uniform int4. Gain over uniform +0.2 [-1.2, +1.7] and -2.7 [-4.3, -1.0]; over the random sets -0.4 [-1.8, +0.9] and -3.3 [-4.9, -1.8]. The law circuit beats it by +3.0 [+1.3, +4.7] and +5.0 [+3.0, +7.0] points.
+- **Verdict:** same language and task format but non-legal content does not give the gain, so the E18 gain is not explained by Portuguese or by the sigla format. Among the eight protected sets of each size (law, four control circuits, three random draws) the law circuit is the best at both sizes (+3.2 and +2.3 points over uniform; the best of the others are +1.7 and +1.7), and some circuits hurt (down to -2.7), so which units are protected matters. With eight sets the chance of the law circuit being the best by luck would be 1 in 8 per size, so this is supportive, not conclusive. Intervals cover questions only; one seed.
+- **Still open:** a non-law Portuguese benchmark (does the law circuit help only law?), another legal task (the reviewed sheet), more random draws and seeds, and a larger model.
+- **Artifacts:** `docs/controles/fatos_siglas_gerais_ptbr.csv`, `compress/oab.py` (`FEW_SHOT["siglas_gerais"]`), `outputs/circuit_probe_4b_gerais.json`, `outputs/protect_law_4b_gerais.json`.
+
 ## 4. Consequences
 
 **What the project can now claim (measured, with the stated caveats):**
 - Causal channel sets for a behaviour can be found by minimal-pair patching and validated against dose-matched and lexical controls (E6).
 - Factual recall sits in sparse cross-layer circuits (~1% of units). At neuron level the MLP part is domain-specific and nearly disjoint across domains, while attention heads form a shared part that carries the rest (E9, E10, E14).
 - Measured per-layer sensitivity is roughly additive and a much better allocation signal than the diagonal `D` (E8, E13).
-- On Qwen3.5-4B, a Brazilian-law (siglas) circuit exists and protecting 0.3% of the weights chosen by it recovers about a third of the OAB accuracy lost to int4 group-wise quantization (E16, E18); circuits of other domains give no comparable gain (E19), but the law prompts are in Portuguese, so language is an unresolved confound.
+- On Qwen3.5-4B, a Brazilian-law (siglas) circuit exists and protecting 0.3% of the weights chosen by it recovers about a third of the OAB accuracy lost to int4 group-wise quantization (E16, E18); circuits of other domains and a non-legal Portuguese sigla circuit give no comparable gain (E19, E20), so the gain is not explained by language or by the sigla format (one seed, supportive evidence).
 
 **What it cannot claim:**
 - That a domain-specialization score improves bit allocation; every test of that came back null or dose-explained (E2, E4, E7, E11–E13).
@@ -192,7 +199,7 @@ and 6 full-attention) on an RTX 3090 (`maidai`) for the persona, circuit and all
 
 ## 7. Open questions and next steps (Proposed)
 
-0. **Portuguese control for E18/E19:** build a circuit from non-legal facts with Portuguese prompts (for example chemical-element symbols in Portuguese) and protect it under the same int4 setup; also test a non-law Portuguese benchmark. Colleagues were asked for Portuguese fact sets.
+0. **Next controls for E18 to E20:** a non-law Portuguese benchmark (does the law circuit help only law?), a second legal task from the reviewed fact sheet, more random draws and seeds, and a larger model. The Portuguese language control itself is done (E20).
 1. **Neuron-level protection at equal bytes** (follow-up to E14, which answered the granularity question): protect the neuron-level MLP circuit (about 2,000 neurons, roughly 1% extra bytes at fp16) plus the shared heads in a whole-model nf4 plan and compare with dose-based and measured-table protection as in E13. The earlier suggestion was motivated by Goodfire's "Neurons as an Interpretable Basis" (https://www.goodfire.com/research/neurons-as-an-interpretable-basis, Qwen3.6-35B-A3B, one model), read through a summarizing tool without its appendix, so its numbers are unverified; it has no quantization or weight-pruning results.
 2. **A damage metric with less noise.** Build the measured table with KL divergence to the base model's output distribution, on target-domain facts and on secondary text, and allocate under two constraints (`ΔL_T ≤ ε_T`, `ΔL_S ≤ ε_S`) as proposed in the project notes.
 3. **Tail-conditioned statistics.** Test whether a `V` weighted toward high-activation tokens makes `D` rank layers better (Spearman against the measured table).

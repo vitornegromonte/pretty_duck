@@ -55,3 +55,14 @@ def test_register_csv_domains_adds_few_shot_prefixed_templates(tmp_path):
     assert facts == {"direito_siglas": [("STF", "Supremo Tribunal Federal")], "extra": [("A", "B")]}
     assert templates["direito_siglas"] == FEW_SHOT["siglas"] + "A sigla {} significa"
     assert templates["extra"] == "Frase {} aqui"  # no prefix defined for this relation
+
+
+def test_general_siglas_control_sheet_is_clean_and_disjoint_from_its_prompt_examples():
+    from compress.oab import FEW_SHOT
+    got = load_fact_csv("docs/controles/fatos_siglas_gerais_ptbr.csv")
+    pairs = got["siglas_gerais"]["pairs"]
+    subjects = [s for s, _ in pairs]
+    assert len(pairs) >= 50 and len(set(subjects)) == len(subjects)
+    assert not any(f"sigla {s} significa" in FEW_SHOT["siglas_gerais"] for s in subjects)
+    legal = {s for s, _ in load_fact_csv("docs/revisao_juridica/fatos_direito_br_rascunho.csv")["siglas"]["pairs"]}
+    assert not legal & set(subjects)  # a control must not reuse the legal sigla subjects

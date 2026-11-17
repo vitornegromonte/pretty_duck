@@ -59,6 +59,9 @@ def load_fact_csv(path: str | Path, *, drop=("remover",)) -> dict[str, dict]:
 FEW_SHOT = {
     "siglas": ("Em direito brasileiro, a sigla MPU significa Ministério Público da União.\n"
                "Em direito brasileiro, a sigla TJDFT significa Tribunal de Justiça do Distrito Federal e dos Territórios.\n"),
+    # non-legal Portuguese control for the sigla task (docs/controles): same language and format, no law
+    "siglas_gerais": ("Em português, a sigla IFPE significa Instituto Federal de Pernambuco.\n"
+                      "Em português, a sigla FINEP significa Financiadora de Estudos e Projetos.\n"),
     "sedes_trf": ("A sede do Supremo Tribunal Federal fica em Brasília.\n"
                   "A sede do Superior Tribunal de Justiça fica em Brasília.\n"),
 }

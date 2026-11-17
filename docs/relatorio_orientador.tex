@@ -1,0 +1,79 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{enumitem}
+\setlist{itemsep=3pt,topsep=4pt,parsep=0pt}
+\hyphenpenalty=10000
+\exhyphenpenalty=10000
+\raggedright
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+\pagestyle{plain}
+\newcommand{\secao}[1]{\par\textbf{#1}\par\nopagebreak[4]}
+
+\begin{document}
+
+\textbf{\Large Relatório de andamento: testes de interpretabilidade mecanicista}
+
+Projeto de compressão de modelos de linguagem por domínio
+
+Autor: Vitor Negromonte \hfill 16 de novembro de 2026
+
+\bigskip
+
+\secao{1. Objetivo}
+
+Queremos comprimir modelos de linguagem (reduzir os bits dos pesos) de forma diferente em cada parte do modelo, preservando o desempenho em um domínio de interesse. A ideia que estamos testando é a seguinte: se conseguirmos descobrir, com testes causais, quais partes do modelo sustentam um domínio, poderemos comprimir menos essas partes e mais as outras. Não usamos treino, gradientes nem ajuste fino. A quantização é simulada, então não afirmamos ganho de velocidade.
+
+\secao{2. O que foi feito}
+
+Foram 14 experimentos com dois modelos pequenos (SmolLM-135M e Qwen3.5-0.8B). Os principais tipos de teste foram:
+
+\begin{itemize}
+\item contraste de ativação entre domínios, para ver quais canais do modelo ativam mais em um domínio do que em outros;
+\item patching de ativação com pares mínimos: trocamos as ativações de uma execução do modelo pelas de outra, que difere em um único fator, e medimos o efeito. Sempre com controles: conjuntos aleatórios, conjuntos com a mesma perturbação e texto com as palavras embaralhadas;
+\item circuitos de conhecimento factual (capitais, símbolos químicos e tradução para o francês), buscando as cabeças de atenção e os neurônios que sustentam cada resposta;
+\item sensibilidade medida por camada: quantizar uma camada de cada vez e medir a perda;
+\item comparação de métodos para decidir onde gastar bytes extras de precisão, com o mesmo tamanho total.
+\end{itemize}
+
+\secao{3. Resultados principais}
+
+\begin{enumerate}
+\item O contraste de ativação entre domínios não muda a alocação de bits. Os planos para dois domínios diferentes diferem em apenas 2 de 210 blocos.
+\item Um efeito que parecia causal (a ablação por média) era explicado apenas pelo tamanho da perturbação. Conjuntos de controle com a mesma perturbação reproduziram o resultado.
+\item Em pares mínimos de persona, canais escolhidos pela diferença padronizada de médias são necessários e suficientes para o efeito (0,80 e 0,84, contra cerca de 0,17 em conjuntos aleatórios), e vão além da simples sobreposição de palavras. Mas quantizar esses canais em 3 ou 4 bits não prejudica o comportamento mais do que quantizar canais aleatórios.
+\item O conhecimento factual fica em circuitos esparsos: 16 de 1.680 unidades (cerca de 1\%) restauram quase todo o efeito em fatos não usados na escolha. As cabeças de atenção são compartilhadas entre os domínios. Os neurônios das camadas MLP são específicos de cada domínio (quase não se repetem entre domínios), mas explicam só metade a dois terços do efeito.
+\item O erro diagonal que o planejador usa hoje não prevê o dano real de quantizar cada camada (correlação perto de zero). Medir o dano diretamente funciona muito melhor: com 10\% de bytes extras, recupera 61\% da perda de qualidade do nf4 uniforme, contra 5\% do erro diagonal.
+\end{enumerate}
+
+\secao{4. O que isso significa}
+
+A detecção causal de componentes funciona, tanto para persona quanto para conhecimento factual. Mas a informação de especialização de domínio não ajudou a decidir quantos bits cada parte recebe. O que ajudou foi medir diretamente a sensibilidade de cada camada. Além disso, os neurônios específicos de cada domínio somam cerca de 0,3\% dos pesos, então comprimi-los de forma diferente muda pouco o tamanho final. O valor deles estaria em protegê-los, e isso ainda não foi testado.
+
+\secao{5. Limitações}
+
+Cada experimento usou um modelo, e só um traço de persona foi testado. Os conjuntos de validação são pequenos (14 a 27 pares por domínio) e vários resultados ainda não têm intervalos de confiança. A tabela de sensibilidade foi medida em texto dos mesmos domínios da avaliação (linhas diferentes), o que favorece esse método. A quantização é simulada.
+
+\secao{6. Próximos passos}
+
+\begin{itemize}
+\item Proteger os neurônios do circuito, com o mesmo total de bytes, e comparar com proteção por erro e pela sensibilidade medida.
+\item Medir a sensibilidade com divergência KL, no domínio de interesse e em um domínio secundário, e alocar com duas restrições.
+\item Ampliar os conjuntos de fatos, incluindo português, replicar em outro modelo e testar um segundo traço de persona.
+\end{itemize}
+
+\secao{7. O que gostaria de discutir}
+
+\begin{itemize}
+\item Vale continuar com compressão guiada por domínio, ou é melhor focar em sensibilidade medida por camada, que foi o resultado mais sólido?
+\item Há possibilidade de acesso a GPUs com mais memória para testar modelos maiores?
+\item Posso pedir ajuda a colegas para revisão estatística e para montar conjuntos de fatos em português?
+\end{itemize}
+
+\secao{Material}
+
+Todos os experimentos, números e limitações estão no registro de decisões do projeto (docs/adr/0001-domain-aware-quantization-experiment-record.md) e no documento docs/method.pdf, no repositório do projeto.
+
+\end{document}

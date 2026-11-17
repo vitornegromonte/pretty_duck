@@ -215,6 +215,10 @@ mean ablation; Qwen3.5-0.8B for the persona experiments), one trait, one seed.
   at 3-4 bits leaves the persona shift intact, like random columns of the same
   dose; only 2-bit shows a hint, inside the noise.
 
+The full record of what was tested, the decisions it supports and the open questions is in
+`docs/adr/0001-domain-aware-quantization-experiment-record.md`; the circuit-level, measured-sensitivity and
+equal-bytes results are in Appendix B of `docs/method.pdf`.
+
 Not shown: factual-knowledge sub-networks, other traits (the honesty split has no
 defined prompts), other models or seeds. Patching covers the question and answer
 tokens, so it shows where an effect is expressed, not where it is stored.

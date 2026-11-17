@@ -315,7 +315,7 @@ At 3 and 4 bits there is no effect: the persona shift survives quantizing the pe
 (i) Domain-contrast signals are real but small at block and row-group granularity and do not change a size-matched allocation. (ii) Mean ablation
 with a domain-contrast set looks selective, but an equal-dose control reproduces it. (iii) On minimal pairs, the standardized-mean-difference set (\emph{zdiff}) is
 sufficient and necessary for the prompt-induced margin shift, specific to the persona content over an unrelated pair, and partly beyond word overlap. (iv) That does not translate into a
-quantization signal at 3--4 bits.
+quantization signal at 3--4 bits. Appendix~\ref{app:circuits} extends the study to measured sensitivity, circuits and end-to-end allocation, and qualifies this last point.
 
 \paragraph{What it does not show.}
 \begin{itemize}\setlength\itemsep{0pt}
@@ -364,7 +364,7 @@ python scripts/persona_quant.py --model-path Qwen/Qwen3.5-0.8B \
 \appendix
 \section{Code map}
 \begin{center}\small
-\begin{tabular}{ll}
+\begin{tabular}{lp{7.4cm}}
 \toprule
 file & role\\
 \midrule
@@ -376,9 +376,194 @@ file & role\\
 \code{compress/pair\_patching.py} & minimal-pair patching, restoration, necessity\\
 \code{compress/quant\_probe.py} & column-wise fake quantization and retention\\
 \code{scripts/persona\_*.py} & persona gate, patching and quantization drivers\\
+\code{compress/facts.py}, \code{circuit.py} & recall domains; units, scan, circuits, dose matching\\
+\code{compress/sensitivity.py} & measured per-layer $\Delta L$ and multi-layer plans\\
+\code{compress/protect.py} & mixed-format fake quantization, protected columns\\
+\code{scripts/sensitivity.py}, \code{circuit\_probe.py} & measured table; circuit scan, quantization, additivity\\
+\code{scripts/entanglement.py}, \code{protect.py} & core and periphery; protection in whole-model quantization\\
+\code{scripts/alloc\_e2e.py} & allocation comparison at equal bytes\\
 \bottomrule
 \end{tabular}
 \end{center}
+
+
+\section{Measured sensitivity, circuits and end-to-end allocation}
+\label{app:circuits}
+
+This appendix reports experiments run after the main text was written. They move from layers to circuits and ask
+whether any signal beats the plain diagonal dose when extra bytes are spent. All runs use Qwen3.5-0.8B
+(24 layers: 18 linear-attention and 6 full-attention) on an RTX 3090, forward-only, with weights restored after every
+intervention; bit widths below 4 are intervention strengths and nothing is stored in those formats.
+
+\subsection{Measured per-layer sensitivity against the diagonal $D$}
+Each of the 186 text-tower Linears is quantized alone (\code{int8}, \code{int4}, \code{nf4}) and the NLL increase
+$\Delta L_{g,d}(q)$ is measured on 64 held-out lines for each of four domains (math, law, biology, humanities), paired per line.
+The measured effect of a typical layer is tiny (median $|\Delta L|\le 0.001$ nats for int4), and only 16\% (int8), 44\% (int4) and 30\% (nf4)
+of layer--domain cells exceed two standard errors.
+
+\paragraph{$D$ does not predict the measured damage.}
+Across layers the Spearman correlation between $D$ and $\Delta L$ lies between $-0.07$ and $+0.05$ for every
+domain and format, and between $-0.28$ and $+0.13$ when only cells above the noise floor are kept. Only 3 of the 20 layers
+hurting most (int4, math) are among the 20 with the largest $D$ (chance: about 2). The ranking is systematically inverted by layer type
+(Table~\ref{tab:layertype}): damage concentrates in projections that write into the residual stream, which $D$ ranks low.
+The 10 worst layers carry 52\% of the total positive int4 damage. Sensitivity is largely domain-shared: $\Delta L_{\text{math}}$ and
+$\Delta L_{\text{law}}$ correlate at $0.58$ across layers for int4 ($0.30$ for nf4).
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lccc}
+\toprule
+layer type & layers & mean int4 $\Delta L$ (math) & $D$ rank percentile\\
+\midrule
+\code{o\_proj} & 6 & $+0.0069$ & 0.23\\
+\code{down\_proj} & 24 & $+0.0052$ & 0.12\\
+\code{out\_proj} & 18 & $+0.0041$ & 0.13\\
+\code{in\_proj\_qkv} & 18 & $+0.0015$ & 0.95\\
+\code{q\_proj} & 6 & $+0.0013$ & 0.83\\
+\code{gate\_proj} & 24 & $+0.0007$ & 0.74\\
+\bottomrule
+\end{tabular}
+\caption{Measured damage against where $D$ ranks each layer type (0 = lowest, 1 = highest).}
+\label{tab:layertype}
+\end{table}
+
+\paragraph{Layer effects are roughly additive.}
+For 48 random plans of 4, 12 and 40 layers (uniform int4 and mixed formats), the sum of single-layer effects predicts the joint effect with Spearman
+$0.99$ on the same text and $0.85$--$0.97$ on a disjoint held-out split. The median ratio of measured to predicted is $1.02$, $1.05$ and $1.10$
+for 4, 12 and 40 layers (held-out: $1.10$, $0.97$, $1.06$, with individual plans from $0.55$ to $1.94$): about 10\% superadditive at 40 layers, with a lot of noise.
+
+\subsection{Circuit discovery on factual recall}
+\paragraph{Task and units.}
+Three templated domains with different subject vocabularies are used (capitals, element symbols, English$\to$French words), as entity-swap minimal pairs of equal token
+length. The metric is the logit difference $\mathrm{LD}=\mathrm{logit}[a_c]-\mathrm{logit}[a_k]$ at the last position. Only facts the model answers correctly are kept
+(capitals 54 of 88 listed, elements 27 of 44, French 52 of 54) and split in two halves: units are scored on one half and circuits validated on the other
+(27/27, 13/14 and 26/26 pairs). A \emph{unit} is a slice of a write projection's input: an attention head (128 channels in 288 linear-attention heads, 256 in 48 full-attention heads)
+or a group of 64 MLP neurons (1344 groups), 1680 units in all. Sufficiency patches clean activations into the corrupt run, and necessity patches corrupt activations into the clean
+run; both are the fraction of the clean-minus-corrupt $\mathrm{LD}$ restored or destroyed, over all positions. Patching \emph{all} units gives exactly $1.00$ for both: the read position's
+residual stream is its embedding plus the sum of write-projection outputs, which then all come from the patched side.
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lccccc}
+\toprule
+domain & best single unit & units $>0.01$ & suff.\ $k{=}16$ & suff.\ $k{=}32$ & random, $k{=}16$\\
+\midrule
+capitals & 0.62 & 33 & 0.98 & 1.00 & $-0.03$\\
+elements & 0.34 & 55 & 1.01 & 1.01 & $+0.04$\\
+French   & 0.11 & 44 & 0.98 & 1.03 & $+0.02$\\
+\bottomrule
+\end{tabular}
+\caption{Held-out sufficiency of the top-$k$ units by single-unit sufficiency. Necessity is within $0.01$ of sufficiency in every case. Random sets have the same
+size classes; at $k{=}128$ they range from $-0.19$ to $-0.04$.}
+\label{tab:circuits}
+\end{table}
+A handful of units (about 1\%) carries essentially all of the effect, spread over layer 0 (three units), layers 14--21 and a few at layers 22--23. Single units are weak
+(the best restores 0.62, 0.34 and 0.11), so the effect is joint.
+
+\subsection{Entanglement: a shared core and a domain-specific periphery}
+Evaluating each domain's top-64 circuit on every domain's held-out pairs gives necessity of $0.99$--$1.00$ in every cell except French$\to$capitals ($0.88$); random sets give $-0.13$ to $+0.16$.
+The unit sets overlap with Jaccard indices $0.36$ (capitals--elements), $0.20$ (capitals--French) and $0.26$ (elements--French), against about $0.02$ for random sets. The \emph{shared core} is the 18 units in the top 32 of at least two domains
+(9 in all three); alone, it has sufficiency/necessity $0.72/0.75$ (capitals), $1.03/1.03$ (elements) and $0.93/0.91$ (French).
+
+Table~\ref{tab:entangle} separates the core from the rest. Full circuits are domain-leaning only at tiny $k$; with the core removed, capitals and French keep a clear own-domain effect and elements
+does not beyond $k\approx32$; circuits restricted to units outside every other domain's top 64 have near-zero off-domain effect but explain only 0.4--0.55 of their own.
+\begin{table}[h]
+\centering\small
+\begin{tabular}{llccc}
+\toprule
+variant & $k$ & capitals & elements & French\\
+\midrule
+full & 4  & 0.93 / 0.20 & 0.81 / 0.41 & 0.54 / 0.34\\
+full & 16 & 0.99 / 0.83 & 1.01 / 0.76 & 0.98 / 0.82\\
+full & 64 & 1.00 / 0.99 & 1.00 / 1.00 & 1.01 / 0.96\\
+no core & 16 & 0.91 / 0.11 & 0.33 / 0.09 & 0.48 / 0.07\\
+no core & 64 & 0.98 / 0.54 & 0.71 / 0.81 & 0.72 / 0.26\\
+specific only & 16 & 0.45 / 0.03 & 0.25 / 0.02 & 0.22 / 0.03\\
+specific only & 64 & 0.55 / 0.13 & 0.46 / 0.09 & 0.43 / 0.07\\
+\bottomrule
+\end{tabular}
+\caption{Necessity of a domain's circuit on its own domain / mean of the other two (held-out pairs; random sets give $0.00$--$0.17$). No intervals were computed; elements has only 14 validation pairs.}
+\label{tab:entangle}
+\end{table}
+
+\subsection{Quantizing circuits at equal dose}
+Quantizing a circuit's weight columns is compared with class-matched random sets and with random sets whose diagonal dose $\sum E^2V$ is closest to the circuit's (out of 200 draws).
+Dose can only be matched at small $k$; for $k\ge 64$ the circuit's dose is 2--3$\times$ that of any random set, so those rows are not interpretable.
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lccc}
+\toprule
+case & circuit & dose-matched random & doses\\
+\midrule
+capitals, int4, $k{=}16$ & $+0.29$ (acc $-0.30$) & $+0.00$ (acc $-0.02$) & 0.52 vs 0.46\\
+capitals, int3, $k{=}16$ & $+0.11$ & $+0.06$ & 2.21 vs 2.21\\
+elements, int2, $k{=}16$ & $+0.87$ (acc $-0.14$) & $+0.05$ (acc $-0.01$) & 6.27 vs 6.31\\
+elements, int2, $k{=}32$ & $+9.68$ (acc $-1.00$) & $+0.07$ (acc $-0.02$) & 8.06 vs 8.02\\
+French, int2, $k{=}32$ & $+5.02$ (acc $-0.85$) & $+0.85$ (acc $-0.19$) & 8.91 vs 8.96\\
+\bottomrule
+\end{tabular}
+\caption{Loss of the mean answer log-probability under column quantization of the circuit and of dose-matched random sets (accuracy loss in brackets).}
+\label{tab:circuitquant}
+\end{table}
+The circuits are specifically fragile at 2 bits, and at int4 only for capitals at $k{=}16$; for elements and French int3 and int4 cause almost no damage. They also raise generic NLL on neutral text much more than equal-dose sets
+(for example $+4.58$ against $+0.20$ for elements, int2, $k{=}32$), so they are generally critical components, not recall-specific ones. Across domains there is no diagonal dominance: at int3 the elements circuit
+hurts capitals ($1.00$) more than elements ($0.16$). Joint damage is not predictable from single units at 2 bits: for $k{=}16$ the joint effect over the sum of single-unit effects is
+$2.54/2.45$ (capitals), $0.87/0.14$ (elements) and $1.43/0.91$ (French); at 3 and 4 bits the effects are too small to read.
+
+\subsection{Protection inside a whole-model quantization}
+All 186 Linears are fake-quantized per row, keeping selected unit columns at fp16 (scales computed over the unprotected columns). This baseline is crude: uniform int4 already removes capitals accuracy
+($1.00\to0.00$, log-probability $-5.24$) and most of French ($-0.77$ accuracy), with neutral NLL $+0.69$; int3 and int2 collapse ($+7.33$, $+12.49$).
+Table~\ref{tab:protect} gives the share of the NLL damage recovered by protecting the same number of unit columns.
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lcccc}
+\toprule
+protected set & weights & int4 & int3 & int2\\
+\midrule
+core (18 units) & 0.63\% & 21\% & 26\% & 2\%\\
+random, same classes (10 draws) & 0.63\% & 3\% & 3\% & 0\%\\
+dose-top, same classes & 0.63\% & 24\% & 16\% & $-1$\%\\
+union of circuits (69 units) & 1.90\% & 32\% & 33\% & $-2$\%\\
+random, same classes (10 draws) & 1.90\% & 10\% & 10\% & 0\%\\
+dose-top, same classes & 1.90\% & 47\% & 34\% & 1\%\\
+\bottomrule
+\end{tabular}
+\caption{Share of uniform quantization's NLL damage recovered by protecting unit columns at fp16.}
+\label{tab:protect}
+\end{table}
+Circuits beat random sets but not a dose-based choice of the same size, and protection does not rescue accuracy at int4 (capitals stay at zero in every condition).
+
+\subsection{End-to-end allocation at equal bytes}
+With the finer \code{nf4} baseline (uniform over the text tower, 264.4~MB; mean NLL cost $+0.098$ and fact log-probability cost $+0.127$; uniform int8 at $+89\%$ bytes costs about nothing), each method spends the same
+extra byte budget on upgrades, and actual bytes come from the exact formulas: whole layers to int8/fp16 greedily by the reduction of $D$ or of the measured damage per byte, or fp16-protected unit columns ranked by mean circuit sufficiency, by nf4 dose per extra byte, or at random.
+Scoring uses held-out fact prompts and 32 held-out lines for each of four text domains, disjoint from the lines of the measured table.
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lccccc}
+\toprule
+extra bytes & layers by $D$ & layers measured & units circuit & units dose & random units\\
+\midrule
++1\%  & $-1$\% & \textbf{24\%} & 11\% & 16\% & 0\%\\
++2\%  & $+1$\% & \textbf{32\%} & 19\% & 22\% & $+1$\%\\
++5\%  & $+3$\% & \textbf{46\%} & 22\% & 33\% & 6\%\\
++10\% & $+5$\% & \textbf{61\%} & 24\% & 36\% & 8\%\\
+\bottomrule
+\end{tabular}
+\caption{Share of uniform nf4's NLL damage recovered at equal actual extra bytes (random: mean of 5 draws).}
+\label{tab:e2e}
+\end{table}
+The measured table is by far the best signal for text NLL, whereas $D$ at layer level recovers about as little as random units. Unit-level dose does reasonably, which suggests the
+diagonal error is informative per column and fails when compared across layers. Factual recall is noisy and does not follow NLL: at $+5\%$ the mean log-probability loss is $0.083$ ($D$), $0.149$ (measured), $0.114$ (circuit), $0.200$ (dose)
+and $0.120$ (random, range $0.061$--$0.261$) against $0.127$ for uniform nf4; with 27, 14 and 26 prompts per domain most of these differences are within the spread of random draws, and the measured allocation, which optimizes text NLL,
+does not improve recall at budgets up to $+5\%$ (capitals $0.270$ against $0.099$ for nf4). The advantage on NLL is partly in-distribution, because the measured table was built on text from the same domains as the evaluation lines.
+
+\subsection{Reading}
+\begin{itemize}\setlength\itemsep{0pt}
+\item The diagonal $D$ is unreliable for comparing layers and is inverted by layer type; measured per-layer sensitivity is cheap, roughly additive, and the strongest allocation signal found, for the metric it was measured on.
+\item Factual recall depends on sparse circuits of about 1\% of the units, which are validated on held-out facts and necessary and sufficient, but largely shared across relations: a core of 18 units carries most of the effect in every domain, with a domain-specific periphery that is clean for capitals, moderate for French and thin for elements.
+\item Circuit-informed protection beats random protection and loses to dose-based and measured choices at equal bytes, so no domain-specific signal improves on domain-agnostic ones in these experiments.
+\item The next step suggested by these results is to measure $\Delta L$ on the target metric (the facts) and on a secondary text metric, and allocate under both constraints with a measured table.
+\end{itemize}
+Limitations: one model, small fact sets (no confidence intervals in the circuit and allocation runs), random controls matched on size class and dose but not on depth, and a crude per-row quantizer in the protection experiment.
 
 \begin{thebibliography}{9}\small
 \bibitem{wanda} M.~Sun, Z.~Liu, A.~Bair, J.~Z.~Kolter. A simple and effective pruning approach for large language models. 2023.

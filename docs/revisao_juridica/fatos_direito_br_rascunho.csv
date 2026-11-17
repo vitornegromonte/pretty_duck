@@ -1,0 +1,61 @@
+id,relacao,sujeito,resposta_primeira_palavra,resposta_completa,modelo_de_frase,verificacao,status
+siglas-001,siglas,STF,Supremo,Supremo Tribunal Federal,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-002,siglas,STJ,Superior,Superior Tribunal de Justiça,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-003,siglas,TST,Tribunal,Tribunal Superior do Trabalho,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-004,siglas,TSE,Tribunal,Tribunal Superior Eleitoral,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-005,siglas,STM,Superior,Superior Tribunal Militar,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-006,siglas,TCU,Tribunal,Tribunal de Contas da União,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-007,siglas,CNJ,Conselho,Conselho Nacional de Justiça,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-008,siglas,CNMP,Conselho,Conselho Nacional do Ministério Público,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-009,siglas,OAB,Ordem,Ordem dos Advogados do Brasil,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-010,siglas,AGU,Advocacia-Geral,Advocacia-Geral da União,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-011,siglas,DPU,Defensoria,Defensoria Pública da União,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-012,siglas,PGR,Procuradoria-Geral,Procuradoria-Geral da República,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-013,siglas,MPF,Ministério,Ministério Público Federal,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-014,siglas,CGU,Controladoria-Geral,Controladoria-Geral da União,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-015,siglas,CADE,Conselho,Conselho Administrativo de Defesa Econômica,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-016,siglas,CVM,Comissão,Comissão de Valores Mobiliários,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-017,siglas,ANPD,Autoridade,Autoridade Nacional de Proteção de Dados,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-018,siglas,INSS,Instituto,Instituto Nacional do Seguro Social,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-019,siglas,FGTS,Fundo,Fundo de Garantia do Tempo de Serviço,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-020,siglas,CLT,Consolidação,Consolidação das Leis do Trabalho,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-021,siglas,CPC,Código,Código de Processo Civil,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-022,siglas,CPP,Código,Código de Processo Penal,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-023,siglas,CDC,Código,Código de Defesa do Consumidor,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-024,siglas,CTB,Código,Código de Trânsito Brasileiro,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-025,siglas,ECA,Estatuto,Estatuto da Criança e do Adolescente,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-026,siglas,LGPD,Lei,Lei Geral de Proteção de Dados,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-027,siglas,LINDB,Lei,Lei de Introdução às Normas do Direito Brasileiro,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-028,siglas,LRF,Lei,Lei de Responsabilidade Fiscal,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-029,siglas,ADI,Ação,Ação Direta de Inconstitucionalidade,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-030,siglas,ADC,Ação,Ação Declaratória de Constitucionalidade,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-031,siglas,ADO,Ação,Ação Direta de Inconstitucionalidade por Omissão,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-032,siglas,ADPF,Arguição,Arguição de Descumprimento de Preceito Fundamental,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-033,siglas,MS,Mandado,Mandado de Segurança,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-034,siglas,RE,Recurso,Recurso Extraordinário,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-035,siglas,REsp,Recurso,Recurso Especial,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-036,siglas,HC,Habeas,Habeas Corpus,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-037,siglas,EC,Emenda,Emenda Constitucional,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-038,siglas,LC,Lei,Lei Complementar,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-039,siglas,MP,Medida,Medida Provisória,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-040,siglas,PEC,Proposta,Proposta de Emenda à Constituição,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-041,siglas,CPI,Comissão,Comissão Parlamentar de Inquérito,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-042,siglas,JEF,Juizado,Juizado Especial Federal,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-043,siglas,CF,Constituição,Constituição Federal,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-044,siglas,CNPJ,Cadastro,Cadastro Nacional da Pessoa Jurídica,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-045,siglas,CPF,Cadastro,Cadastro de Pessoas Físicas,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-046,siglas,TRF,Tribunal,Tribunal Regional Federal,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-047,siglas,TRT,Tribunal,Tribunal Regional do Trabalho,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-048,siglas,TRE,Tribunal,Tribunal Regional Eleitoral,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+siglas-049,siglas,TJ,Tribunal,Tribunal de Justiça,"Em direito brasileiro, a sigla {} significa",conferir o nome oficial completo,rascunho
+limpe-050,limpe,L,Legalidade,Legalidade,"No direito administrativo brasileiro, a letra {} da sigla LIMPE representa o princípio da","CF/88, art. 37, caput",rascunho
+limpe-051,limpe,I,Impessoalidade,Impessoalidade,"No direito administrativo brasileiro, a letra {} da sigla LIMPE representa o princípio da","CF/88, art. 37, caput",rascunho
+limpe-052,limpe,M,Moralidade,Moralidade,"No direito administrativo brasileiro, a letra {} da sigla LIMPE representa o princípio da","CF/88, art. 37, caput",rascunho
+limpe-053,limpe,P,Publicidade,Publicidade,"No direito administrativo brasileiro, a letra {} da sigla LIMPE representa o princípio da","CF/88, art. 37, caput",rascunho
+limpe-054,limpe,E,Eficiência,Eficiência,"No direito administrativo brasileiro, a letra {} da sigla LIMPE representa o princípio da","CF/88, art. 37, caput",rascunho
+sedes_trf-055,sedes_trf,1ª Região,Brasília,Brasília,A sede do Tribunal Regional Federal da {} fica em,conferir a sede no site oficial de cada TRF,rascunho
+sedes_trf-056,sedes_trf,2ª Região,Rio,Rio de Janeiro,A sede do Tribunal Regional Federal da {} fica em,conferir a sede no site oficial de cada TRF,rascunho
+sedes_trf-057,sedes_trf,3ª Região,São,São Paulo,A sede do Tribunal Regional Federal da {} fica em,conferir a sede no site oficial de cada TRF,rascunho
+sedes_trf-058,sedes_trf,4ª Região,Porto,Porto Alegre,A sede do Tribunal Regional Federal da {} fica em,conferir a sede no site oficial de cada TRF,rascunho
+sedes_trf-059,sedes_trf,5ª Região,Recife,Recife,A sede do Tribunal Regional Federal da {} fica em,conferir a sede no site oficial de cada TRF,rascunho
+sedes_trf-060,sedes_trf,6ª Região,Belo,Belo Horizonte,A sede do Tribunal Regional Federal da {} fica em,conferir a sede no site oficial de cada TRF,rascunho

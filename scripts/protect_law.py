@@ -40,7 +40,7 @@ from compress.circuit import (KnowledgeProbe, build_facts, enumerate_units, make
 from compress.cli import _load_model
 from compress.evaluate import evaluate_mmlu_rows
 from compress.facts import FACTS, TEMPLATES
-from compress.oab import load_oab, register_csv_domains
+from compress.oab import load_mmmlu, load_oab, register_csv_domains
 from compress.protect import MixedQuant
 from compress.quant_probe import fake_quant_group
 
@@ -64,7 +64,12 @@ def main() -> None:
     p.add_argument("--model-path", required=True)
     p.add_argument("--probe", required=True)
     p.add_argument("--stats", required=True)
-    p.add_argument("--oab", required=True)
+    p.add_argument("--oab", default=None, help="OAB jsonl (benchmark oab)")
+    p.add_argument("--benchmark", choices=["oab", "mmmlu"], default="oab")
+    p.add_argument("--mmmlu-csv", default=None, help="openai/MMMLU mmlu_PT-BR.csv (benchmark mmmlu)")
+    p.add_argument("--n-law", type=int, default=500)
+    p.add_argument("--n-other", type=int, default=500)
+    p.add_argument("--with-standard", action="store_true", help="with --controls, also run the standard comparison")
     p.add_argument("--domain", default="direito_siglas")
     p.add_argument("--n-questions", type=int, default=600)
     p.add_argument("--bits", default="4,3,2")
@@ -73,7 +78,7 @@ def main() -> None:
     p.add_argument("--n-random", type=int, default=3)
     p.add_argument("--controls", default="", help="comma-separated other domains whose circuits are protected "
                    "instead of the law circuit (specificity control); skips the standard comparison")
-    p.add_argument("--sys-prompt", default="As questões a seguir são de provas da OAB. Responda com a letra da alternativa correta.")
+    p.add_argument("--sys-prompt", default=None)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--out", required=True)
     args = p.parse_args()
@@ -100,20 +105,26 @@ def main() -> None:
     assert len(make_pairs(fa, seed).tok_clean) == probe["domains"][args.domain]["n_scan_pairs"], "fact split changed"
     batch = make_pairs(fb, seed + 1)
     kprobe = KnowledgeProbe(model, tokenizer, batch.ids_clean, batch.tok_clean)
-    rows = load_oab(args.oab)
-    random.Random(seed).shuffle(rows)
-    rows = rows[: args.n_questions]
+    if args.benchmark == "mmmlu":
+        rows = load_mmmlu(args.mmmlu_csv, n_law=args.n_law, n_other=args.n_other, seed=seed)
+        sys_prompt = args.sys_prompt or "As questões a seguir são de múltipla escolha. Responda com a letra da alternativa correta."
+    else:
+        rows = load_oab(args.oab)
+        random.Random(seed).shuffle(rows)
+        rows = rows[: args.n_questions]
+        sys_prompt = args.sys_prompt or "As questões a seguir são de provas da OAB. Responda com a letra da alternativa correta."
     log(f"{len(units)} units, {len(qlayers)} quantized layers, {len(rows)} OAB questions, {len(batch.tok_clean)} validation facts")
 
     def measure() -> dict:
-        res = evaluate_mmlu_rows(model, tokenizer, rows, sys_prompt=args.sys_prompt, prompt_style="plain")
+        res = evaluate_mmlu_rows(model, tokenizer, rows, sys_prompt=sys_prompt, prompt_style="plain")
         pr = res["predictions"]
         k = kprobe.stats()
         return {"oab_acc": res["accuracy"], "oab_nll": res["nll_per_token"],
                 "oab_correct": [int(x["predicted"] == x["expected"]) for x in pr], "oab_nll_q": [x["nll"] for x in pr],
                 "law_logp": k["logp"], "law_acc": k["acc"]}
 
-    out = {"config": vars(args) | {"n_val_facts": len(batch.tok_clean), "write_weights": write_weights}, "baseline": measure(), "conditions": []}
+    out = {"config": vars(args) | {"n_val_facts": len(batch.tok_clean), "write_weights": write_weights}, "baseline": measure(), "conditions": [],
+           "rows_area": [r.get("area", "oab") for r in rows]}
     log(f"fp16 baseline: OAB {out['baseline']['oab_acc']:.1f}% nll {out['baseline']['oab_nll']:.3f}, law logp {out['baseline']['law_logp']:.2f}")
 
     def evaluate(name, group, bits, units_protected=None, columns=None):
@@ -127,12 +138,15 @@ def main() -> None:
         Path(args.out).write_text(json.dumps(out))
         return entry
 
-    if args.controls:
+    def run_controls() -> None:
         for bits in bits_list:
             for d in args.controls.split(","):
                 sc = [{"unit": by_key[(l, s_, e)], "suff": su, "nec": ne} for l, s_, e, su, ne in probe["domains"][d]["units"]]
                 for k in ks:
                     evaluate(f"ctrl_{d}_k{k}", f"ctrl_{d}", bits, top_units(sc, k))
+
+    if args.controls and not args.with_standard:
+        run_controls()
         Path(args.out).write_text(json.dumps(out))
         return
 
@@ -157,6 +171,8 @@ def main() -> None:
             evaluate(f"awq_k{k}", "awq", bits, columns=cols)
             for i in range(args.n_random):
                 evaluate(f"random{i}_k{k}", "random", bits, match_random(units, circ, rng))
+    if args.controls:
+        run_controls()
     Path(args.out).write_text(json.dumps(out))
 
 

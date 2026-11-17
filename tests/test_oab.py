@@ -66,3 +66,17 @@ def test_general_siglas_control_sheet_is_clean_and_disjoint_from_its_prompt_exam
     assert not any(f"sigla {s} significa" in FEW_SHOT["siglas_gerais"] for s in subjects)
     legal = {s for s, _ in load_fact_csv("docs/revisao_juridica/fatos_direito_br_rascunho.csv")["siglas"]["pairs"]}
     assert not legal & set(subjects)  # a control must not reuse the legal sigla subjects
+
+
+def test_load_mmmlu_splits_law_and_other_by_position(tmp_path):
+    from compress.oab import load_mmmlu
+    head = ",Question,A,B,C,D,Answer,Subject\n"
+    rows = "".join(f"{i},q{i},a,b,c,d,{'ABCD'[i % 4]},{'professional_law' if i % 3 == 0 else 'astronomy'}\n" for i in range(30))
+    rows += "99,qx,a,b,c,d,Z,astronomy\n"  # invalid answer key is dropped
+    path = tmp_path / "m.csv"
+    path.write_text(head + rows, encoding="utf-8")
+    got = load_mmmlu(path, n_law=4, n_other=6, seed=1)
+    assert [r["area"] for r in got] == ["law"] * 4 + ["other"] * 6
+    assert all(r["subject"] == "professional_law" for r in got[:4]) and all(r["subject"] == "astronomy" for r in got[4:])
+    assert all(len(r["choices"]) == 4 and 0 <= r["answer"] < 4 for r in got)
+    assert got == load_mmmlu(path, n_law=4, n_other=6, seed=1) and got != load_mmmlu(path, n_law=4, n_other=6, seed=2)

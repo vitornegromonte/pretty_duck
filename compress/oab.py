@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import json
+import random
 from pathlib import Path
 
 LETTERS = "ABCD"
@@ -74,3 +75,28 @@ def register_csv_domains(csv_path, specs, facts: dict, templates: dict) -> None:
         name, rel = spec.split("=", 1)
         facts[name] = sheet[rel]["pairs"]
         templates[name] = FEW_SHOT.get(rel, "") + sheet[rel]["template"]
+
+
+LAW_SUBJECTS = ("professional_law", "jurisprudence", "international_law")
+
+
+def load_mmmlu(path: str | Path, *, law_subjects=LAW_SUBJECTS, n_law: int = 500, n_other: int = 500,
+               seed: int = 42) -> list[dict]:
+    """Sample law and non-law questions from the Portuguese MMMLU csv (``openai/MMMLU``, ``mmlu_PT-BR.csv``).
+
+    Rows follow the MMLU layout (``question``, ``choices``, ``answer`` index) plus ``area`` ("law" or
+    "other") and ``subject``.  The first ``n_law`` rows are law, the rest are not, so per-group results
+    can be split by position.  The legal subjects are mostly US law translated to Portuguese.
+    """
+    law, other = [], []
+    with open(path, encoding="utf-8", newline="") as f:
+        for r in csv.DictReader(f):
+            if r["Answer"].strip() not in LETTERS:
+                continue
+            row = {"question": r["Question"], "choices": [r["A"], r["B"], r["C"], r["D"]],
+                   "answer": LETTERS.index(r["Answer"].strip()), "subject": r["Subject"]}
+            (law if r["Subject"] in law_subjects else other).append(row)
+    rng = random.Random(seed)
+    rng.shuffle(law)
+    rng.shuffle(other)
+    return [{**r, "area": "law"} for r in law[:n_law]] + [{**r, "area": "other"} for r in other[:n_other]]

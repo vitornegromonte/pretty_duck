@@ -122,7 +122,7 @@ class SuffixPatch:
         def hook(module, args):
             x = args[0].clone()
             src = self.clean[name]
-            x[:, -self.suffix:, idx.to(x.device)] = src[:, :, idx.to(src.device)].to(x.dtype)
+            x[:, -self.suffix:, idx.to(x.device)] = src[:, :, idx.to(src.device)].to(device=x.device, dtype=x.dtype)
             return (x, *args[1:])
         return hook
 

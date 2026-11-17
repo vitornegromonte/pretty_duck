@@ -27,6 +27,25 @@ def fake_quant(W: torch.Tensor, bits: int) -> torch.Tensor:
     return _quantize_int(W.float(), bits).dequant
 
 
+def fake_quant_group(W: torch.Tensor, bits: int, group: int = 64) -> torch.Tensor:
+    """Symmetric quantize/dequantize with one absmax scale per ``group`` consecutive input columns of a row.
+
+    This is the usual group-wise layout (GPTQ/AWQ-style, group 64 here).  The last block of a row may be
+    shorter.  Simulated: nothing is packed or stored.
+    """
+    if bits < 2 or bits > 8:
+        raise ValueError(f"bits must be in [2, 8], got {bits}")
+    if group < 1:
+        raise ValueError(f"group must be >= 1, got {group}")
+    out, inc = W.shape
+    pad = (-inc) % group
+    w = torch.nn.functional.pad(W.float(), (0, pad)).reshape(out, -1, group)
+    qmax = 2 ** (bits - 1) - 1
+    scale = (w.abs().amax(dim=-1, keepdim=True) / qmax).clamp_min(1e-12)
+    deq = (torch.round(w / scale).clamp(-qmax - 1, qmax) * scale).reshape(out, -1)
+    return deq[:, :inc]
+
+
 class QuantizeColumns:
     """Context manager: fake-quantize the selected columns of the named Linears.
 

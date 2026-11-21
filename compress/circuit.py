@@ -392,3 +392,16 @@ def additivity(probe: KnowledgeProbe, units: list[Unit], bits: int) -> dict:
     joint = probe.damage(unit_sets(units), bits)["dlogp"]
     singles = [probe.damage(unit_sets([u]), bits)["dlogp"] for u in units]
     return {"joint": joint, "sum_single": sum(singles), "n": len(units)}
+
+
+def class_matched_top(ranked_units: list[Unit], like: list[Unit]) -> list[Unit]:
+    """The best-ranked units with the same class counts as ``like`` (for example 20 heads and 12 MLP groups)."""
+    need: dict[str, int] = {}
+    for unit in like:
+        need[unit.cls] = need.get(unit.cls, 0) + 1
+    chosen: list[Unit] = []
+    for unit in ranked_units:
+        if need.get(unit.cls, 0) > 0:
+            chosen.append(unit)
+            need[unit.cls] -= 1
+    return chosen

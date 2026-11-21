@@ -96,3 +96,16 @@ def test_mixed_quant_with_groups_keeps_protected_columns_and_restores(tiny_model
         assert torch.equal(now[:, keep], before[:, keep])
         assert torch.equal(now[:, rest].float(), fake_quant_group(before[:, rest], 3, 4).to(before.dtype).float())
     assert torch.equal(_w(tiny_model, U1), before)
+
+
+def test_outlier_columns_fill_the_weight_budget_by_dose_density(tiny_model):
+    from compress.protect import outlier_columns
+    names = [n for n, m in tiny_model.named_modules() if isinstance(m, torch.nn.Linear) and ".layers." in n]
+    modules = dict(tiny_model.named_modules())
+    V = {n: torch.rand(modules[n].in_features, dtype=torch.double) + 0.1 for n in names}
+    V[names[0]][5] = 1e6  # one column with an enormous dose must be picked first
+    budget = 3 * modules[names[0]].weight.shape[0]
+    cols = outlier_columns(modules, names, V, 3, 8, budget)
+    assert 5 in cols[names[0]].tolist()
+    protected = sum(modules[n].weight.shape[0] * c.numel() for n, c in cols.items())
+    assert budget <= protected <= budget + max(modules[n].weight.shape[0] for n in names)

@@ -132,3 +132,25 @@ def plan_nbytes(shapes: dict[str, tuple[int, int]], formats: dict[str, str] | No
         n_keep = 0 if fmt == "fp16" or not protect or name not in protect else int(protect[name].numel())
         total += out * n_keep * 2 + (storage_nbytes((out, inc - n_keep), fmt) if inc > n_keep else 0)
     return total
+
+
+def outlier_columns(modules, qlayers, V, bits, group, budget_weights) -> dict[str, torch.Tensor]:
+    """Columns of any layer with the highest dose per weight, until ``budget_weights`` are protected."""
+    dens, owner, col, rows = [], [], [], []
+    for li, name in enumerate(qlayers):
+        w = modules[name].weight.data.float()
+        err = (w - fake_quant_group(w, bits, group)).double().square().sum(0)  # per input column
+        d = err * V[name].to(err.device) / w.shape[0]
+        dens.append(d.cpu())
+        owner.append(torch.full((d.numel(),), li))
+        col.append(torch.arange(d.numel()))
+        rows.append(torch.full((d.numel(),), w.shape[0]))
+    dens, owner, col, rows = map(torch.cat, (dens, owner, col, rows))
+    order = torch.argsort(dens, descending=True)
+    take = order[: int(torch.searchsorted(torch.cumsum(rows[order], 0), budget_weights, right=True)) + 1]
+    out: dict[str, torch.Tensor] = {}
+    for li, name in enumerate(qlayers):
+        sel = col[take][owner[take] == li]
+        if sel.numel():
+            out[name] = torch.sort(sel).values
+    return out

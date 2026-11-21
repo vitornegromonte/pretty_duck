@@ -88,3 +88,33 @@ def load_mmlu(
                 {"question": row[0], "choices": row[1:5], "answer": LETTERS.index(answer)}
             )
     return rows
+
+
+def row_to_text(row: dict) -> str:
+    """One MMLU row as plain text (question and the four choices), for calibration or perplexity text."""
+    choices = "\n".join(f"{letter}) {text}" for letter, text in zip(LETTERS, row["choices"]))
+    return row["question"].strip() + "\n" + choices
+
+
+def load_mmlu_groups(
+    groups: dict[str, list[str]], n_eval: int, *, seed: int = 42, split: str = "test",
+    cache_dir: str | Path | None = None,
+) -> tuple[list[dict], dict[str, list[dict]]]:
+    """Evaluation rows and disjoint pools from named groups of MMLU subjects.
+
+    Each group's rows are pooled over its subjects and shuffled with ``seed``. The first ``n_eval`` rows of each group
+    are the evaluation rows (labelled ``area`` = group name, group by group). The remaining rows of the group are its
+    pool, which never overlaps the evaluation rows (use it for calibration text).
+    """
+    import random
+
+    eval_rows: list[dict] = []
+    pools: dict[str, list[dict]] = {}
+    for name, subjects in groups.items():
+        rows = [r for subject in subjects for r in load_mmlu(subject, split, cache_dir)]
+        random.Random(seed).shuffle(rows)
+        if len(rows) < n_eval:
+            raise ValueError(f"group {name!r} has {len(rows)} rows, fewer than n_eval={n_eval}")
+        eval_rows += [{**r, "area": name} for r in rows[:n_eval]]
+        pools[name] = rows[n_eval:]
+    return eval_rows, pools

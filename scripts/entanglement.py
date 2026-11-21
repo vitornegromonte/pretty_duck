@@ -30,7 +30,6 @@ from compress.circuit import (Scanner, Unit, build_facts, core_units, enumerate_
                               make_pairs, match_random, split_facts, top_units, unit_sets)
 from compress.models import load_model
 from compress.facts import FACTS, TEMPLATES
-from compress.oab import register_csv_domains
 
 log = lambda m: print(m, file=sys.stderr, flush=True)
 
@@ -50,8 +49,6 @@ def main() -> None:
     ks = [int(k) for k in args.ks.split(",")]
 
     probe = json.loads(Path(args.probe).read_text())
-    if probe["config"].get("csv_domain"):
-        register_csv_domains(probe["config"]["facts_csv"], probe["config"]["csv_domain"], FACTS, TEMPLATES)
     domains = list(probe["domains"])
     seed = probe["config"]["seed"]
     mlp_group = probe["config"]["mlp_group"]

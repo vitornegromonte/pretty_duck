@@ -56,22 +56,6 @@ def test_model_gptq_changes_weights_and_restores_them(tiny_model, tokenizer):
     assert all(torch.equal(p, before[n]) for n, p in tiny_model.named_parameters())
 
 
-def test_outlier_columns_fill_the_weight_budget_by_dose_density(tiny_model):
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("baselines", "scripts/baselines.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    names = [n for n, m in tiny_model.named_modules() if isinstance(m, torch.nn.Linear) and ".layers." in n]
-    modules = dict(tiny_model.named_modules())
-    V = {n: torch.rand(modules[n].in_features, dtype=torch.double) + 0.1 for n in names}
-    V[names[0]][5] = 1e6  # one column with an enormous dose must be picked first
-    budget = 3 * modules[names[0]].weight.shape[0]
-    cols = mod.outlier_columns(modules, names, V, 3, 8, budget)
-    assert 5 in cols[names[0]].tolist()
-    protected = sum(modules[n].weight.shape[0] * c.numel() for n, c in cols.items())
-    assert budget <= protected <= budget + max(modules[n].weight.shape[0] for n in names)
-
-
 def test_grid_options_keep_the_grid_size_and_clipping_never_hurts_rounding_error():
     from compress.gptq import _fit_grid
     W, H, X = _problem(3)

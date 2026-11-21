@@ -32,7 +32,6 @@ from compress.circuit import (KnowledgeProbe, Scanner, additivity, build_facts, 
                               top_units, unit_sets)
 from compress.models import load_model
 from compress.facts import FACTS, TEMPLATES
-from compress.oab import register_csv_domains
 
 log = lambda m: print(m, file=sys.stderr, flush=True)
 
@@ -48,9 +47,6 @@ def main() -> None:
     p.add_argument("--neutral", default=None, help="text file for the generic-NLL damage check")
     p.add_argument("--stats", default=None, help="stats file; V of the write-projection inputs gives the dose")
     p.add_argument("--no-quant", action="store_true", help="skip quantization, additivity and their entanglement cells")
-    p.add_argument("--facts-csv", default=None, help="review sheet with extra cloze-fact domains")
-    p.add_argument("--csv-domain", action="append", default=[], metavar="NAME=RELATION",
-                   help="register RELATION of the sheet as domain NAME (then list NAME in --domains)")
     p.add_argument("--n-neutral", type=int, default=32)
     p.add_argument("--mlp-group", type=int, default=64)
     p.add_argument("--ks", default="16,32,64,128")
@@ -65,8 +61,6 @@ def main() -> None:
     ks, bits_list, domains = [int(k) for k in args.ks.split(",")], [int(b) for b in args.bits.split(",")], args.domains.split(",")
     if not args.no_quant and not (args.neutral and args.stats):
         raise SystemExit("--neutral and --stats are required unless --no-quant is given")
-    if args.csv_domain:
-        register_csv_domains(args.facts_csv, args.csv_domain, FACTS, TEMPLATES)
 
     model, tokenizer = load_model(args.model_path)
     units = enumerate_units(model, args.mlp_group)

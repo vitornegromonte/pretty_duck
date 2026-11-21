@@ -1,0 +1,491 @@
+# Avaliação ampla — "Causal circuit discovery for domain-aware low-bit quantization"
+
+**Versão para o autor.** O enquadramento recomendado e o programa experimental estão no documento `01_proposta_evolucao_paper`; este documento contém o diagnóstico que os motiva.
+
+Documento avaliado: `Formatting_Instructions_For_NeurIPS_2026-1.pdf` (19 páginas; autoria indicada como `pretty_duck, branch feature/domain-compression`).
+
+Convenções deste relatório:
+
+- "p. N" é a página do PDF.
+- Texto entre aspas curvas é citação literal do documento (conferida por script contra o texto extraído do PDF).
+- Blocos **Minha conta** são cálculos meus a partir dos números do documento, não do documento.
+- Custo: **[T]** só texto; **[R]** reanálise com saídas que já devem existir (json, logits, stats.pt); **[E]** experimento novo (todos os sugeridos são forward-only, como o resto do estudo).
+- Gravidade: **G** grave (derruba uma conclusão ou a submissão), **M** moderada.
+
+---
+
+## 0. Veredito em uma página
+
+**O que é.** Um registro honesto de 23 experimentos (E1–E23) sobre três perguntas: (i) dá para localizar, por patching causal, os componentes que um LLM usa para um domínio? (ii) proteger esses componentes em fp16 ajuda quando o resto vai a int4? (iii) que sinal serve para alocar bits? O documento afirma um ganho (+3,2 pontos no OAB) e, na Seção 9, retira o próprio ganho.
+
+**Estado como paper.** Não é submetível na forma atual a NeurIPS/ICML/ICLR. Três razões independentes: (1) o resumo declara que o efeito principal não está estabelecido; (2) a métrica que sustenta tanto o ganho quanto a retratação (acurácia por letra em 600 questões) não se comporta como medida de dano; (3) a ideia central já tem antecedente direto (TaCQ, COLM 2025) e a variante de proteção por "dose" é o OWQ (AAAI 2024), nenhum dos dois citado. O texto é um caderno de laboratório em ordem cronológica, com 4 referências e sem trabalhos relacionados.
+
+**O que tem valor.** (a) A disciplina de controles (mesmo tamanho, mesma dose, pares embaralhados e irrelevantes) e a disposição de publicar o que falhou. (b) Um resultado negativo limpo e reaproveitável: a seletividade por ablação pela média é efeito de dose (Tabela 2). (c) Um achado metodológico que o texto trata como incômodo e que é, na verdade, o material mais forte: dois modelos com a mesma perda de NLL (0,063 e 0,066 nats) dão 35,0% e 43,3% no OAB, e o de melhor NLL dá 27,2%. (d) A evidência interna de que os "circuitos" achados são componentes genericamente críticos, o que explica por que a proteção não é específica de direito.
+
+**Recomendação.** Mudar a pergunta do paper, conforme o documento `01_proposta_evolucao_paper`: medir quanto a consciência de domínio pode render e que sinal chega mais perto desse limite. Antes de qualquer experimento novo, fazer quatro checagens baratas (Seção 6, L1–L4), porque uma delas pode mostrar que parte do "ruído" é falha de controle.
+
+**As cinco coisas a fazer primeiro.**
+
+1. Avaliar os mesmos pesos quantizados salvos nas duas GPUs e o fp16 nas duas (G1). Decide se 40,7% contra 49,5% é ruído de quantização ou de avaliação.
+2. Contar as letras previstas em cada condição e recalcular a acurácia sem o viés de letra (G1).
+3. Gerar a distribuição nula com 30 conjuntos aleatórios sob RTN (G3).
+4. Avaliar o circuito legal nos pares de siglas gerais e vice-versa (G5); os dados já existem.
+5. Escrever trabalhos relacionados com TaCQ, OWQ, SpQR e Dutta et al. (G6) e decidir a tese do paper (documento 01, Seções 5 e 6).
+
+---
+
+## 1. O que o documento afirma
+
+| # | Afirmação | Onde | Situação segundo o próprio texto |
+|---|---|---|---|
+| A1 | Patching de pares mínimos acha circuitos esparsos (~1% das unidades), validados em fatos não usados na escolha | Tab. 7, 15 | mantida |
+| A2 | Em nível de neurônio, a parte MLP é específica do domínio; cabeças são compartilhadas | B.7 | mantida (só 0.8B, sem direito) |
+| A3 | Sensibilidade por camada medida diretamente é melhor sinal de alocação que o erro diagonal D | B.1, Tab. 19 | mantida |
+| A4 | Proteger 0,30% dos pesos escolhidos pelo circuito legal recupera ~1/3 da perda do int4 no OAB | Tab. 9 | retirada na Seção 9 |
+| A5 | Contraste de domínio (TARC), ablação pela média e D não funcionam | Tab. 1, 2, B.1 | resultados negativos |
+| A6 | Clipping do grid é o maior ganho do lado do quantizador | Tab. 12 | mantida |
+| A7 | Acurácia por letra de um único modelo quantizado não é medida confiável | Tab. 11 | conclusão nova |
+
+---
+
+## 2. O que confere (consistência interna)
+
+Refiz as contas que o texto permite refazer. Fecham:
+
+- Unidades do 4B: 896 cabeças + 4.608 grupos de MLP = 5.504. Bate com a arquitetura pública do Qwen3.5-4B (32 camadas, 24 com 32 cabeças lineares e 8 com 16 cabeças de atenção plena; MLP de 9.216 = 144 grupos de 64 por camada).
+- Unidades do 0.8B: 288 + 48 + 1.344 = 1.680; 19 camadas × 3.584 neurônios = 68.096 (B.7).
+- "about a third": 3,2 / (43,8 − 35,0) = 36%.
+- Colunas do circuito (p. 11): 4.224 e 15.040 são compatíveis com 12 e 67 grupos de MLP mais 20 e 61 cabeças de 128 ou 256 canais; as duas frações (0,30% e 1,08%) implicam o mesmo total de pesos (3,60 e 3,57 bilhões).
+- Tabela 12: 2,513 − 2,331 = 0,182; 2,397 − 2,331 = 0,066; fechamento de 63,7%.
+- Tabela 2: diferenças tarc − energy-random (+0,009, +0,012, +0,008, −0,006).
+- Tabela 4: a coluna em nats é reproduzida por restauração × deslocamento (zdiff 0,84×2,82 − 0,63×1,95 = 1,14; reportado +1,11).
+- SmolLM: 30 × 7 = 210 blocos; 2.430 grupos de 64 linhas; orçamento de 40% = 116,6 MB.
+- Acaso das sobreposições: 20×20/186 = 2,15 ("about 2"); 512²/68.096 = 3,85 ("3.9").
+
+Não achei erro aritmético. Os problemas são de inferência e de desenho, não de conta.
+
+---
+
+## 3. Novidade e posicionamento
+
+O documento tem 4 referências (Wanda, QLoRA/NF4, ROME, e o paper de persona sem autores) e nenhuma seção de trabalhos relacionados. O GPTQ, que é o quantizador central, não está na lista.
+
+| Ideia do documento | Antecedente mais próximo | O que sobra de novo |
+|---|---|---|
+| Achar um "circuito" da tarefa e mantê-lo em 16 bits enquanto o resto é quantizado | **TaCQ** — Xiao, Sung, Stengel-Eskin, Bansal, "Task-Circuit Quantization", COLM 2025, arXiv:2504.07389. Usa gradiente para estimar o impacto, preserva ~0,35% dos pesos, ganhos em 2–3 bits. | Ser forward-only; usar patching de ativação (unidades) em vez de atribuição por gradiente (pesos); e, principalmente, reportar que **não** funciona sob controles |
+| Manter colunas em fp16 escolhidas por erro × Hessiana diagonal, colocadas por último para absorver o erro do GPTQ | **OWQ** — Lee et al., AAAI 2024, arXiv:2306.02272. A sensibilidade do OWQ é λ_j·‖ΔW_:,j‖², igual à "dose" ΣE²V; as "weak columns" vão para o fim antes do OPTQ, como os "error sinks" da Seção 2.4. | Nada: `highest-dose` e `outlier_all` são OWQ e devem ser chamados assim |
+| Pesos individuais sensíveis em precisão alta | SpQR (Dettmers et al., 2023); SqueezeLLM (Kim et al., 2023) *(citados de memória; conferir)* | — |
+| Clipping do intervalo por grupo | Busca de encolhimento `mse` no `quant.py` do próprio GPTQ; busca de clip do AWQ *(de memória; o arquivo está em `third_party/gptq_ref/quant.py`, basta abrir)* | Nada como método; vale como ablação |
+| Tabela de sensibilidade por camada medida, aproximadamente aditiva | Literatura de precisão mista (HAWQ, ZeroQ, HAQ) *(de memória)*; MXSens (arXiv:2607.17733) mede a sensibilidade quantizando uma camada isolada; TAQ (arXiv:2511.06516) aloca bits por camada sem treino, condicionado à tarefa *(achados em busca posterior; ler)* | A comparação quantitativa com D. A inversão por tipo de camada em arquitetura híbrida já tem trabalho de 2026 (ver H8) |
+| Acurácia esconde mudança de comportamento do modelo quantizado | **Dutta et al.**, "Accuracy is Not All You Need", NeurIPS 2024, arXiv:2407.09141 (flips e KL) | O caso extremo: mesma NLL, 8 pontos de diferença; melhor NLL, acurácia de acaso |
+| Viés de letra em múltipla escolha | Zheng et al., ICLR 2024; Pezeshkpour & Hruschka, 2023 *(de memória)* | — |
+| Localização causal não prediz onde intervir | Hase et al., "Does Localization Inform Editing?", NeurIPS 2023 *(de memória)* | O análogo para quantização; serve de precedente para a Fase 2 do documento 01 |
+| Circuito de siglas | García-Carrasco, Maté e Trujillo, 2024, circuito de previsão de acrônimos de três letras *(não busquei este trabalho; ele é mencionado no texto de arXiv:2412.15750, que veio como resultado da busca do TaCQ. Que o modelo é o GPT-2 é lembrança minha. Conferir a referência original antes de citar)* | Tarefa inversa (expansão), em português |
+| Sub-redes de persona | Ye, Wang, Ling, Xiao, Li, Ma, Hui, ICLR 2026, arXiv:2602.07164 | Referência [4] está sem autores; completar |
+
+**Leitura franca.** Como método positivo, a novidade é pequena: a combinação "circuito → proteger em 16 bits" já foi publicada com resultados positivos, e a variante por dose é anterior. O que ainda não vi publicado é o resultado negativo com controles de mesmo tamanho e mesma dose, mais a demonstração de que a evidência positiva usual (acurácia por letra, uma realização, IC sobre questões) produz ganhos "significativos" que somem. Esse resultado negativo é uma das três peças do paper proposto no documento 01. Há trabalho recente de 2026 sobre flips e KL em modelos comprimidos que apareceu na busca (arXiv:2606.19558, 2610.00694, 2607.00908); precisa ser lido antes de reivindicar a parte de avaliação.
+
+---
+
+## 4. Red flags
+
+### G1. 40,7% contra 49,5% com "código e calibração idênticos" não é ruído de arredondamento
+
+**Local.** p. 10, Tabela 11 e legenda; p. 11, item (i) da Seção 9.4; p. 3, parágrafo "Noise and metrics".
+
+**Trechos.** “our GPTQ, 3080 Ti (identical code and calibration)” (linha com 49,5%); “Equivalent quantizers differ by up to 15 accuracy points while their NLL differs by 0.04: accuracy by letter is dominated by rounding noise.”; “the gain of the previous section is probably rounding noise, which our intervals over questions never sampled”.
+
+**Em linguagem simples.** O texto explica a diferença entre execuções equivalentes como sorte no arredondamento. Mas sorte por questão tem um teto calculável, e a diferença observada passa desse teto. Então existe um fator que move muitas questões juntas, ou as duas execuções não eram de fato equivalentes. Nos dois casos, "ruído" não é explicação; é o que falta explicar.
+
+**Minha conta.**
+
+- Se duas realizações são equivalentes (mesma probabilidade de acerto p_q em cada questão) e as questões são independentes, Var(acc₁ − acc₂) = 2·Σp_q(1−p_q)/n² ≤ 0,5/n. Com n = 600, o desvio-padrão da diferença é no máximo 2,89 pontos. Esse máximo só ocorre se todas as 600 questões forem cara ou coroa.
+- 49,5 − 40,7 = 8,8 pontos = 3,05 desvios no pior caso (p ≤ 0,0023 bilateral). No modelo "sabe ou chuta" (43,8% com acaso de 25% implica ~25% de questões sabidas e ~450 chutadas), o desvio cai para 2,16 pontos e a diferença vira 4,1 desvios.
+- 49,5% está 5,7 pontos acima do fp16 (43,8%). Um modelo de 4 bits ganhar 34 questões em 600 do original de 16 bits pede explicação própria.
+- Tabela 12: GPTQ+clipping (43,3%) contra GPTQ+clipping+assimétrico+act-order (27,2%) são 16,1 pontos = 5,6 desvios no pior caso, com NLL quase igual (2,397 e 2,387).
+- A linha da 3080 Ti não tem NLL (traço na tabela). É a medida que diria se os dois modelos são de fato equivalentes.
+
+**Hipóteses que as contas sugerem (não verificadas; não tenho os logits).** (a) Deslocamento do viés de letra: a quantização muda pouco a NLL e muito a preferência entre os tokens A/B/C/D; 27,2% é o que se obtém respondendo quase sempre a mesma letra. (b) Diferença de avaliação, não de quantização: tamanho de lote ou padding diferentes nas duas GPUs (12 GB contra 24 GB) alteram logits em fp16 e viram empates. (c) Instabilidade numérica do GPTQ (inversa da Hessiana em precisão simples) gerando modelos realmente diferentes.
+
+**Consequência.** A afirmação A7 fica mal fundamentada na forma atual, e ela é a base da retratação de A4. O "±6 pontos" do resumo vem de quatro números heterogêneos (35,0; 34,7; 40,7; 49,5) e não é uma estimativa de variância.
+
+**Como resolver.**
+
+1. Salvar o state dict quantizado na 3090 e avaliá-lo na 3080 Ti, e vice-versa. Avaliar o fp16 nas duas. Se o mesmo arquivo de pesos der acurácias diferentes, o ruído é da avaliação.
+2. Fixar lote = 1 (ou padding idêntico) e dtype de avaliação; repetir.
+3. Para cada condição das Tabelas 9, 11 e 12, registrar a contagem de letras previstas e a contagem do gabarito nas 600 questões.
+4. Recalcular a acurácia após subtrair o viés médio de letra, estimado em questões fora das 600.
+5. Medir a NLL neutra do modelo da 3080 Ti.
+6. Reportar KL para o fp16 sobre a distribuição das quatro letras e a fração de respostas trocadas (flips), como em Dutta et al.
+
+**Esboço de código.**
+
+```python
+# (1) mesmos pesos, duas máquinas
+torch.save({k: v.cpu() for k, v in model.state_dict().items()}, "int4_gptq_3090.pt")
+# na outra GPU:
+model.load_state_dict(torch.load("int4_gptq_3090.pt"))
+logits = eval_oab_logits(model, questions, batch_size=1)      # [600, 4], letras A-D
+
+# (3) letras previstas contra gabarito
+pred = logits.argmax(1)
+print(np.bincount(pred, minlength=4) / len(pred), np.bincount(gold, minlength=4) / len(gold))
+
+# (4) acurácia sem viés de letra (prior estimado fora das 600)
+prior = logp_calib.mean(0)                                     # [4]
+acc_debiased = ((logits.log_softmax(1) - prior).argmax(1) == gold).float().mean()
+
+# (6) distância ao fp16
+kl = (p_fp16 * (p_fp16.log() - p_q.log())).sum(1).mean()
+flips = (pred_fp16 != pred).float().mean()
+```
+
+**Critério de aceite.** O mesmo arquivo de pesos dá a mesma acurácia (±1 questão) nas duas máquinas; a tabela traz, por condição, NLL, KL, flips e a distribuição de letras; a frase sobre ruído cita uma variância estimada com R ≥ 5 realizações.
+
+**Texto pronto (substitui a legenda da Tabela 11).**
+
+> Table 11: Four int4 quantizers with nearly identical neutral-text NLL (2.35–2.39) span 34.7–49.5% letter accuracy on the same 600 questions. A gap of 8.8 points between two runs of the same code exceeds what independent per-question noise can produce (at most 2.9 points s.d.), so a run-level factor is present; Section X isolates it (same weights on both GPUs, predicted-letter histograms, prior-corrected accuracy).
+
+**Versão curta.** A diferença entre execuções "idênticas" é grande demais para ser sorte por questão; identifique o fator antes de chamar de ruído. **Custo: [E] barato** (avaliações de 600 questões; nenhuma quantização nova nos passos 1–5).
+
+---
+
+### G2. O denominador de "um terço da perda" não está estabelecido
+
+**Local.** p. 1 (resumo); p. 3, Seção 2.6; p. 10, Seção 9.1; p. 11, Tabela 12.
+
+**Trechos.** “protecting 0.30% of the weights chosen by it recovers about a third of the accuracy that group-wise int4 round-to-nearest quantization loses on OAB bar-exam questions”; “so int4 leaves only 2.0 and 0.6 points of headroom”.
+
+**Em linguagem simples.** Para dizer que a proteção recupera um terço da perda, é preciso que a perda (8,8 pontos) exista. Os próprios números do documento põem isso em dúvida.
+
+**Minha conta.**
+
+- Quatro modelos int4 da Tabela 11: 35,0; 34,7; 40,7; 49,5. Média 40,0; desvio 6,9; o fp16 (43,8) fica dentro do intervalo. A perda média é 3,8 pontos, não 8,8.
+- O mesmo modelo RTN int4 perde 2,0 pontos em direito e 0,6 em não-direito no MMMLU (10 e 3 questões em 500).
+- RTN int4 tem perda de NLL de 0,063 e 35,0% no OAB; GPTQ+clipping int3 tem perda de NLL de 0,066 e 43,3%. Mesmo dano em NLL, 8,3 pontos de diferença.
+
+**Consequência.** A frase do resumo e o item (iv) da discussão (p. 12) descrevem recuperação de uma perda que pode ser, em boa parte, o mesmo fator do G1.
+
+**Como resolver.** Definir dano por KL ao fp16 e NLL; reportar a acurácia como secundária e sempre com flips. Reescrever a frase.
+
+**Texto pronto (resumo).**
+
+> Under round-to-nearest int4, protecting 0.30% of the weights selected by the legal circuit raised letter accuracy on 600 OAB questions by 3.2 points in one realization; because letter accuracy of int4 models with near-identical NLL ranges from 34.7% to 49.5% on these questions, we do not interpret this as recovered damage.
+
+**Critério de aceite.** Nenhuma frase expressa ganho como fração de uma perda medida em acurácia por letra com uma realização. **Custo: [T]**.
+
+---
+
+### G3. O intervalo sobre questões não mede a incerteza do critério de seleção
+
+**Local.** p. 9, Seção 8.3; p. 10, Tabela 9; p. 1, resumo.
+
+**Trechos.** “The legal circuit is the only protected set with a significant gain at both sizes”; “Circuits of other domains, a non-legal circuit with the same language and task format, and choices by quantization error or by activation magnitude do not give this gain.”; “Protecting just any circuit does not help (some hurt, down to −2.7 points), so which units are protected matters”; “which by chance alone would happen with probability 1/8 per size”.
+
+**Em linguagem simples.** O intervalo de confiança responde "estes dois modelos específicos diferem nestas questões?". A pergunta do paper é outra: "escolher pelo circuito é melhor que escolher de outro jeito?". Para essa, a unidade de repetição é o conjunto protegido, não a questão. E os próprios controles mostram que conjuntos arbitrários produzem diferenças "significativas" nas duas direções.
+
+**Minha conta.**
+
+- Na Tabela 9, oito conjuntos não legais têm intervalo. Quatro excluem zero: elementos-32 (+1,7 [+0,7; +2,8]), dose-128 (+1,7 [+0,5; +3,0]), elementos-128 (−2,2 [−3,8; −0,5]) e siglas gerais-128 (−2,7 [−4,3; −1,0]). Taxa de "significância" entre controles: 4/8 = 50%, dois para cada lado, contra 5% nominais.
+- Dispersão dos ganhos dos controles (usando os extremos dos sorteios aleatórios, pois o valor do meio não é dado): em 32 unidades, média +0,6 e desvio 1,19; o circuito legal (+3,2) está a 2,2 desvios (p unilateral ≈ 0,04 por t com 7 g.l.). Em 128 unidades, média −0,26 e desvio 1,66; o circuito (+2,3) está a 1,5 desvio (p ≈ 0,10).
+- Ativação-32 dá +2,7 [0,0; +5,2]: 0,5 ponto (3 questões) abaixo do circuito. A frase do resumo ("do not give this gain") não se sustenta para ativação-32, elementos-32 nem dose-128.
+- Os dois tamanhos não são independentes (as 32 unidades estão contidas nas 128), então 1/8 por tamanho não se multiplica.
+- Proteger pesos em fp16 piorar o modelo de forma "significativa" (−2,7) é, por si, um sinal de que a métrica não é monótona no dano.
+
+**Consequência.** A leitura correta da Tabela 9 é: o circuito legal é o maior de ~10 conjuntos, a cerca de 2 desvios da dispersão dos demais, numa única realização. É sugestivo, não é um efeito.
+
+**Como resolver.**
+
+1. Sortear 30 conjuntos aleatórios com as mesmas classes (20 cabeças + 12 grupos de MLP; depois 61 + 67) e, se possível, a mesma distribuição de profundidade do circuito.
+2. Para cada um, quantizar por RTN e avaliar nas mesmas questões.
+3. Reportar a posição do circuito nessa distribuição (p de permutação) em vez do IC sobre questões.
+4. Repetir com a métrica contínua (KL ao fp16).
+
+**Esboço de código.**
+
+```python
+gains = []
+for seed in range(30):
+    S = sample_units(n_heads=20, n_mlp=12, depth_profile=legal_depths, seed=seed)
+    acc_S = eval_oab(quantize_rtn(model, bits=4, group=64, protect=S)).mean()
+    gains.append(acc_S - acc_uniform)
+p_perm = (1 + sum(g >= gain_legal for g in gains)) / (1 + len(gains))
+```
+
+**Critério de aceite.** O texto reporta o p de permutação contra ≥ 30 conjuntos e a dispersão dos controles; a palavra "significant" só aparece associada a esse teste.
+
+**Texto pronto (substitui a primeira frase citada).**
+
+> Among the protected sets of each size, the legal circuit gives the largest gain (+3.2 and +2.3 points); relative to the spread of the control sets (s.d. about 1.2 and 1.7 points) this is roughly 2.2 and 1.5 standard deviations. Intervals over questions exclude zero for four of the eight control sets as well, in both directions, so they do not measure the uncertainty of the selection rule.
+
+**Versão curta.** Troque IC sobre questões por distribuição nula sobre conjuntos. **Custo: [E]** (30 quantizações RTN + 30 avaliações por tamanho; RTN não exige calibração).
+
+---
+
+### G4. A retratação sob GPTQ apoia-se na mesma realização suspeita, e muda o comparador
+
+**Local.** p. 10–11, Seção 9.2.
+
+**Trechos.** “The circuit is indistinguishable from uniform quantization, and the larger differences sit inside the noise above.”; “random units 46.8–49.8 / 36.0–40.8”; “so the drop of outlier_all has no mechanistic explanation and is left inconclusive”.
+
+**Em linguagem simples.** A conclusão "sob GPTQ o circuito não ajuda" compara o circuito com um único número, o uniforme de 49,5%, que é justamente a execução anômala do G1. E deixa de usar o comparador que o método define na Seção 1 (controles do mesmo tamanho).
+
+**Minha conta.**
+
+- Contra o uniforme da 3080 Ti (49,5%): circuito −1,7 e −2,8.
+- Contra o uniforme da 3090 (40,7%), mesmo código: circuito +7,1 e +6,0.
+- Contra os aleatórios do mesmo tamanho em 128 unidades (36,0–40,8%): circuito (46,7%) fica +5,9 a +10,7 acima de todos os três sorteios.
+- Proteger 1,08% de unidades aleatórias em fp16 sob GPTQ derruba 8,7 a 13,5 pontos em relação ao uniforme. Manter pesos originais não deveria custar tanto.
+
+**Consequência.** A Seção 9.2 não refuta a Seção 8 nem a confirma. O sinal do efeito depende de qual execução uniforme se toma. A queda grande com proteção aleatória aponta para a implementação das colunas protegidas no GPTQ (congeladas ou "error sinks") ou para o mesmo fator do G1.
+
+**Como resolver.** (1) Resolver G1 primeiro. (2) Rodar o uniforme e cada conjunto protegido com R ≥ 5 sorteios de calibração; comparar por KL e NLL. (3) Teste unitário: proteger zero colunas pelo caminho de código "protegido" deve reproduzir o uniforme bit a bit. (4) Reportar sempre a comparação com aleatórios do mesmo tamanho.
+
+**Critério de aceite.** A tabela de GPTQ traz média e desvio sobre realizações para uniforme, circuito, dose e aleatório, e o teste "zero colunas protegidas = uniforme" passa.
+
+**Texto pronto.**
+
+> Under GPTQ (one realization) the legal circuit scores 1.7–2.8 points below the uniform model of the same run, 6–7 points above the uniform model of a second run of the same code, and 6–11 points above same-size random sets at 128 units. With a single realization per condition these comparisons do not determine the sign of the effect.
+
+**Custo: [E]** (o mais caro da lista: ~20 quantizações GPTQ do 4B).
+
+---
+
+### G5. O desenho de pares mínimos não mede "conhecimento de um domínio", e a tarefa de siglas é em parte ortográfica
+
+**Local.** p. 1 (resumo); p. 2, Seção 2.1; p. 9, Seção 8.1 e Tabela 8; p. 13, limitações; p. 17, B.4.
+
+**Trechos.** “the sparse set of components a language model uses for one domain of knowledge”; “That the circuit transfers from siglas to OAB questions is an empirical finding that is not explained.”; “so they are generally critical components, not recall-specific ones”; “No intervals; the legal and elements sets have 13–14 pairs.”
+
+**Em linguagem simples.** São três problemas encadeados.
+
+1. O par mínimo troca um sujeito por outro do mesmo domínio (STF por outra sigla jurídica). Tudo o que é comum ao domínio fica igual nas duas execuções e, por construção, não aparece no patching. O método acha o que distingue um fato do outro, não o que o modelo usa para direito.
+2. A métrica é o primeiro token da expansão. Em siglas, esse token é fortemente previsto pela primeira letra (S → Supremo/Superior, T → Tribunal, C → Código/Conselho). O que se mede pode ser um mapeamento letra → palavra institucional frequente, que o controle de siglas gerais também tem. Vários fatos jurídicos devem compartilhar o primeiro token (Tribunal, Código, Conselho, Lei), o que reduz a diversidade efetiva dos pares. Isso é inferência minha; não vi a planilha.
+3. O documento tem a peça que testaria isso e não a usa: há um circuito de siglas gerais com o mesmo template, mas a Tabela 8 só cruza os quatro domínios principais.
+
+**Minha conta.** 13 pares de validação para o circuito legal; suficiência 0,74 com k = 8 é uma razão de somas sem intervalo. O núcleo de 15 unidades, sozinho, tem necessidade 0,78 em direito (p. 9), ou seja, a maior parte do efeito "legal" vem de unidades compartilhadas com capitais, elementos e francês.
+
+**Consequência.** O título e a primeira frase do resumo prometem mais do que o desenho pode entregar. A falta de especificidade no MMMLU (E21) é o que se esperaria, dado B.4 e o núcleo compartilhado (ver H6).
+
+**Como resolver.**
+
+1. **[R]** Avaliar o circuito legal nos pares de siglas gerais e o de siglas gerais nos pares legais (necessidade e suficiência cruzadas) e reportar o Jaccard dos dois conjuntos. Os dois `probe.json` já existem.
+2. **[R]** Bootstrap sobre pares para todas as suficiências e necessidades das Tabelas 7, 8, 15 e 16.
+3. **[R]** Reportar quantos primeiros tokens distintos há entre os 26 fatos legais e quantos pares têm a resposta com a mesma inicial da sigla.
+4. **[E]** Pares entre domínios (mesmo template, sujeito jurídico contra sujeito não jurídico) para isolar o que é do domínio.
+5. **[T]** Trocar "domain of knowledge" por "relation" no resumo e no título.
+
+**Critério de aceite.** Uma tabela legal × siglas gerais com intervalos; se a necessidade cruzada for alta (digamos > 0,7), o texto passa a chamar o circuito de "sigla-expansion circuit".
+
+**Texto pronto.**
+
+> A circuit here is the set of units that carries subject-specific information for one templated relation. Because clean and corrupt prompts come from the same relation, components shared by all prompts of a domain are invisible to this procedure.
+
+**Custo: [R]** para 1–3, **[E]** para 4, **[T]** para 5.
+
+---
+
+### G6. Antecedentes diretos ausentes
+
+**Local.** p. 19 (referências); p. 3, fim da Seção 2.4; p. 13, limitações.
+
+**Trecho.** “Our implementation is validated against the authors’ code”, sem a referência ao GPTQ na lista.
+
+**Em linguagem simples.** Um revisor de quantização vai procurar TaCQ, OWQ e SpQR na primeira página. Não os encontrando, lê o método como reinvenção.
+
+**Como resolver.** Escrever a seção de trabalhos relacionados com a tabela da Seção 3 deste relatório. Renomear `highest-dose`/`outlier_all` para "OWQ-style". Dizer que o clipping é a opção existente do GPTQ/AWQ. Se a tese for positiva em algum ponto, comparar com TaCQ nas mesmas condições (há código público). Completar a referência [4].
+
+**Critério de aceite.** GPTQ, AWQ, OWQ, SpQR, TaCQ, Dutta et al., Hase et al. e ao menos duas referências de patching (ACDC, boas práticas de activation patching) citados e diferenciados em uma frase cada.
+
+**Custo: [T]** (mais **[E]** se entrar a comparação com TaCQ).
+
+---
+
+### G7. O documento é um registro de laboratório, não um paper
+
+**Local.** Todo o documento; exemplos em p. 1, 3, 11, 15.
+
+**Trechos.** “the circuit-protection effect is not established, while clipping the quantization grid is the largest quantizer-side gain measured”; “were running when this version was written and are not reported yet”; “This appendix reports experiments run after the main text was written.”
+
+**Em linguagem simples.** A ordem é a ordem em que as coisas foram feitas. A Seção 2 chama de "current method" algo cujo benefício a Seção 9 nega. O apêndice B (E8–E14) vem logicamente antes da Seção 8 (E15–E20). O resumo afirma e desmente. Há suítes em execução.
+
+**Outros pontos de forma.** O PDF não usa o estilo do NeurIPS (apesar do nome do arquivo); tem 14 páginas de corpo, acima do limite de 9 páginas das edições recentes (conferir a chamada do alvo); as referências vêm depois do apêndice; não há checklist; a autoria é o nome do repositório; há uma única figura, um esquema, e 19 tabelas; as Seções 12 e A são instruções de execução que pertencem ao repositório.
+
+**Como resolver.** Ver a estrutura proposta no documento 01, Seção 6.5. **Custo: [T]**.
+
+---
+
+### M1. Possível confusão de reagrupamento nos baselines de colunas espalhadas
+
+**Local.** p. 3, Seção 2.5; Tabelas 9 e 10.
+
+**Trecho.** “the scales of such a layer are computed over its unprotected columns only”.
+
+**Explicação.** Unidades (cabeças, grupos de 64 neurônios) são faixas contíguas alinhadas aos blocos de 64 colunas. Colunas de maior ativação são espalhadas. Se, ao retirá-las, os blocos de 64 forem refeitos sobre as colunas restantes, todos os limites de bloco da camada mudam e o arredondamento da camada inteira é outro. O baseline "ativação" receberia então uma perturbação extra que o circuito não recebe.
+
+**Minha conta.** Pela largura dos ICs dá para estimar quantas respostas mudam em relação ao uniforme (aproximação normal; os valores exatos estão nos json): dose-32 ≈ 10; circuito legal-32 ≈ 26 (≈ 23 melhoram, 3–4 pioram); ativação-32 ≈ 64 (≈ 40 melhoram, 24 pioram). No MMMLU, ativação-128 perde 3,6 pontos em não-direito, onde quantizar o modelo inteiro custa 0,6: proteger 1% dos pesos teria feito seis vezes mais estrago que quantizar tudo.
+
+**Como resolver.** Esclarecer no texto como os blocos são formados após a remoção. Se são refeitos, manter os blocos originais e apenas excluir as colunas protegidas do cálculo da escala. **Critério:** proteger um conjunto vazio de colunas espalhadas reproduz o uniforme bit a bit. **Custo: [R]/[E]**.
+
+### M2. Regime escolhido pelo resultado e teste de especificidade sem poder
+
+**Local.** p. 3 e p. 10.
+
+**Trechos.** “Protection is judged only at a bit width where uniform quantization loses accuracy without collapsing”; “The circuit helps law and non-law alike and random sets do the same: no law specificity.”
+
+**Explicação.** O regime (int4, grupos de 64, RTN) foi escolhido porque ali o OAB cai sem colapsar; é uma escolha condicionada ao desfecho. No MMMLU, a margem é de 10 e 3 questões; vários ganhos reportados excedem a margem (circuito-128 em não-direito: +1,2 contra 0,6 disponíveis). Um teste em que o ganho passa de 100% da perda não mede recuperação.
+
+**Como resolver.** Trocar "no law specificity" pelo texto sugerido (meu, não do documento): *no detectable law specificity: with 2.0 and 0.6 points of headroom the test cannot separate the hypotheses*. Refazer a especificidade com KL ao fp16 por subconjunto (direito e não-direito), que não depende de margem em acurácia. **Custo: [T] + [E]**.
+
+### M3. O patching de persona (E6) não tem controle de dose
+
+**Local.** p. 5, Seções 5.1–5.3; p. 7–8, Tabelas 4 e 5.
+
+**Trechos.** “Equal-dose controls are essential: a selective effect that they reproduce is not evidence of necessity.”; “zdiff is both sufficient (0.84 vs 0.18 for random) and necessary (0.80 vs 0.15)”.
+
+**Explicação.** O documento identifica o confundidor de dose na ablação pela média e não o aplica ao patching. `zdiff` escolhe, por construção, os canais cuja média mais difere entre os dois prompts; copiar esses canais transporta a maior parte da diferença de ativação. O controle é aleatório simples.
+
+**Minha conta.** `zdiff` restaura 1,11 nats da parte real-menos-embaralhado, contra 0,85 nats de deslocamento específico de persona: 131%.
+
+**Como resolver.** Acrescentar um controle aleatório pareado em Σ(h_clean − h_corrupt)² por camada, como o `energy-random` da Seção 5.1. **Critério:** `zdiff` supera o controle pareado com intervalo pareado. Se não superar, E6 passa para a lista de negativos. **Custo: [E]**.
+
+### M4. "Neurônios quase disjuntos" depende do limiar
+
+**Local.** p. 19, B.7; resumo.
+
+**Trechos.** “almost disjoint across domains”; “top-512 overlap 77, 27 and 26, chance 3.9”.
+
+**Minha conta.** No top-512 a sobreposição é 20×, 7,0× e 6,8× o acaso. Em nível de grupo, os Jaccard de 0,36, 0,20 e 0,26 (top-64 de 1.680; acaso de 2,44 unidades) correspondem a 13,9×, 8,8× e 10,8× o acaso. Em enriquecimento sobre o acaso, neurônios e grupos se sobrepõem de forma parecida; para capitais–elementos, os neurônios se sobrepõem mais.
+
+**Explicação.** A leitura "o emaranhamento era efeito de granularidade" precisa de uma comparação que não está no texto: circuito só de grupos de MLP contra circuito só de neurônios de MLP, no mesmo k em pesos. Os circuitos de neurônios carregam metade a dois terços do efeito e a necessidade fora do domínio sobe com k (0,15 → 0,27). Só há 0.8B, três domínios, sem intervalos.
+
+**Como resolver.** Reportar sobreposição como razão sobre o acaso em vários k; acrescentar a linha "MLP groups only" à Tabela 16; bootstrap sobre pares. **Custo: [R]**.
+
+### M5. Tabela de sensibilidade medida: ruído, in-distribution, e D pode estar só mal normalizado
+
+**Local.** p. 15–16, B.1; p. 18, B.6.
+
+**Trechos.** “only 16% (int8), 44% (int4) and 30% (nf4) of layer–domain cells exceed two standard errors”; “The advantage on NLL is partly in-distribution”; “Unit-level dose does reasonably, which suggests the diagonal error is informative per column and fails when compared across layers.”
+
+**Explicação.** D soma erro de saída em unidades absolutas. Camadas diferentes têm escalas de saída diferentes e caminhos diferentes até a perda, então D não é comparável entre camadas sem normalização. A terceira citação é o próprio documento chegando perto disso. Antes de declarar D inútil, falta testar a versão relativa. E a tabela medida não melhora a recordação de fatos (p. 18), só a NLL do mesmo tipo de texto em que foi medida.
+
+**Esboço de código (nenhum forward novo; usa stats.pt).**
+
+```python
+out_energy = (W.double() ** 2 * V[None, :]).sum()     # ~E||Wx||^2 sob a mesma hipótese diagonal
+D_rel = D / out_energy
+rho = spearmanr(D_rel_por_camada, deltaL_medido).statistic
+```
+
+**Critério de aceite.** O texto reporta o Spearman de D relativo contra ΔL (qualquer que seja) e a alocação por tabela medida avaliada em texto de domínio não usado na medição. **Custo: [R]**.
+
+### M6. "Validated" e "real baselines" são mais fortes que a evidência
+
+**Local.** p. 10, Seção 9.2; Tabela 11.
+
+**Explicação.** A validação contra o código de referência fecha no erro por matriz (16,88 contra 16,85) e na NLL (2,362 contra 2,352), mas os dois dão 40,7% e 34,7% no OAB. O grid comum é simétrico absmax, que não é a configuração usual do GPTQ. AWQ propriamente dito e métodos por rotação não entram (reconhecido na p. 13). A calibração tem 160 linhas.
+
+**Como resolver.** Dizer "matches at the layer-error and NLL level"; incluir uma linha com o GPTQ na configuração padrão dos autores; se o paper for negativo, AWQ e rotação podem ficar como limitação declarada. **Custo: [T] + [E]**.
+
+### M7. Dados e modelo
+
+**Local.** p. 6 e p. 13.
+
+**Trechos.** “that a jurist has not reviewed yet”; “no license declared in its card”.
+
+**Explicação.** (a) A planilha de fatos jurídicos é rascunho. (b) O conjunto de exames não declara licença; isso entra no checklist de qualquer conferência. (c) Provas da OAB são públicas e podem estar no pré-treino. (d) O 4B acerta 43,8% com acaso de 25%: no modelo "sabe ou chuta", sabe cerca de um quarto das questões; o sinal de dano é pequeno por construção. (e) Uma família de modelos, uma semente. (f) A arquitetura é híbrida (Gated DeltaNet), o que limita a generalização a transformers convencionais e, ao mesmo tempo, é um ponto de interesse se for dito.
+
+**Como resolver.** Usar as 2.210 questões menos as de calibração (erro-padrão independente cai de 2,04 para ~1,06 ponto); incluir um modelo que saiba mais direito (o 9B da mesma família é o passo mais barato) e um de arquitetura convencional; revisão da planilha por jurista. **Custo: [E]**.
+
+### M8. Suficiência sem intervalos e controles não pareados em profundidade
+
+**Local.** Tabelas 7, 8, 15, 16; p. 19 (limitações do apêndice).
+
+**Explicação.** Com 13–15 pares, razões de somas como 0,74 ou 0,51/0,06 precisam de intervalo. Os aleatórios igualam classe e tamanho, não camada; como os circuitos se concentram em camadas 14–21 (0.8B), um aleatório nas mesmas camadas é o controle justo. **Custo: [R]** para os intervalos, **[E]** para o controle em profundidade.
+
+---
+
+## 5. Insights que os resultados contêm e o texto não destaca
+
+**H1. Mesma NLL, 8 pontos de diferença; melhor NLL, acurácia de acaso.** RTN int4 (ΔNLL 0,063; 35,0%) e GPTQ+clipping int3 (ΔNLL 0,066; 43,3%); a combinação de melhor NLL da Tabela 12 (2,387) dá 27,2%. O texto registra isso em uma frase (“OAB accuracy does not follow NLL (27.2% for the best NLL).”). Com o diagnóstico do G1 (histograma de letras, acurácia sem viés), vira a figura principal de um paper de avaliação.
+
+**H2. Os intervalos já contêm a contagem de respostas trocadas.** Pela largura dos ICs: dose-32 troca ~10 respostas, circuito-32 ~26, ativação-32 ~64. É a métrica de flips de Dutta et al. obtida de graça. Reportar a tabela 2×2 (melhorou/piorou) por condição diz mais que o ganho líquido.
+
+**H3. Metade dos controles é "significativa", nas duas direções.** É um experimento de taxa de falso positivo já meio feito (G3). Com 30 conjuntos aleatórios, a frase "IC de bootstrap sobre questões rejeita o nulo em X% dos conjuntos arbitrários" é um resultado citável por quem avalia quantização seletiva.
+
+**H4. Sob GPTQ, o circuito fica 6–11 pontos acima de todos os aleatórios do mesmo tamanho (128 unidades), e os aleatórios ficam 9–13 pontos abaixo do uniforme.** O texto não comenta nenhum dos dois fatos. Ou há um problema no caminho de colunas protegidas do GPTQ, ou proteger colunas arbitrárias atrapalha a compensação de erro e o circuito escapa disso. As duas saídas interessam.
+
+**H5. E11 prevê E21.** B.4 mostra que quantizar o circuito eleva a NLL de texto neutro muito mais que conjuntos de mesma dose (+4,58 contra +0,20) e que o circuito de elementos fere capitais mais que elementos. O núcleo compartilhado tem necessidade 0,66–0,78 em todos os domínios. Logo, o que o patching acha são componentes genericamente críticos, com predominância de cabeças. Proteger componentes genéricos ajuda direito e não-direito igualmente, que é o resultado do MMMLU. O texto apresenta E21 como surpresa; é a consequência de E11.
+
+**H6. Pelo critério do próprio estudo, dose por unidade ganha do circuito em 3 de 4 comparações.** Tabela 19 (bytes iguais): circuito 11/19/22/24% contra dose 16/22/33/36%. Tabela 18: núcleo 21% contra dose 24% em int4; união 32% contra 47%. Só o experimento do 4B com RTN e uma realização favorece o circuito. E a alocação por camadas medidas dá 24/32/46/61%, cerca do dobro do circuito em todo orçamento. A proteção de 0,30% e 1,08% dos pesos custa +0,83% e +2,99% de bytes (com 4,25 bits efetivos); nesses orçamentos a Tabela 19 já diz qual sinal vence.
+
+**H7. Dose funciona por coluna e falha por camada.** Aponta para um fator de escala por camada ausente em D (M5). Se o D relativo recuperar a ordenação, a "tabela medida" deixa de ser necessária e o resultado A3 muda de natureza.
+
+**H8. Inversão por tipo de camada em arquitetura híbrida.** A Tabela 14 mostra que as projeções que escrevem no fluxo residual concentram o dano e que `in_proj_qkv` (das camadas Gated DeltaNet) é robusta apesar de D alto. Esse espaço já tem trabalho de 2026: arXiv:2609.04098 (quantização de 4 bits das camadas Gated DeltaNet de um híbrido de 27B) e arXiv:2607.02893 (busca de precisão por grupo repetida no Qwen3.5). A Tabela 14 é, portanto, confirmação em modelos pequenos, não resultado novo; os dois trabalhos precisam ser lidos e citados.
+
+**H9. Persona: o deslocamento é majoritariamente lexical.** No Qwen 0.8B, só 0,85 de 2,82 nats (30%) é específico da instrução; no SmolLM, nada. Isso é relevante para quem usa o conjunto de persona de Ye et al. e está escondido na Seção 7.3.
+
+**H10. Camada 23 com restauração negativa (−0,53) e saturação em k = 20%** (aleatório restaura 0,45). O segundo fato diz que, a partir de certa fração, qualquer conjunto "funciona"; é um limite útil para escolher k em estudos de patching por canal.
+
+---
+
+## 6. Melhorias de baixo custo, em ordem de execução
+
+| # | Ação | Resolve | Custo | Critério de aceite |
+|---|---|---|---|---|
+| L1 | Mesmos pesos quantizados e fp16 avaliados nas duas GPUs, lote fixo | G1, G4 | [E] minutos | mesma acurácia ±1 questão para o mesmo arquivo |
+| L2 | Histograma de letras previstas e acurácia sem viés de letra, por condição | G1, G2, H1 | [R] se os logits foram salvos; senão [E] | tabela por condição; 27,2% explicado ou não |
+| L3 | NLL da execução da 3080 Ti; KL ao fp16 e flips em todas as tabelas | G1, G2, M2 | [E] | colunas novas nas Tabelas 9–12 |
+| L4 | 30 conjuntos aleatórios sob RTN por tamanho; p de permutação | G3, H3 | [E] | p reportado; "significant" só com esse teste |
+| L5 | Cruzamento circuito legal × siglas gerais; Jaccard | G5 | [R] | tabela 2×2 com intervalos |
+| L6 | Bootstrap sobre pares em todas as suficiências/necessidades | G5, M4, M8 | [R] | intervalos nas Tabelas 7, 8, 15, 16 |
+| L7 | D relativo a partir de stats.pt | M5, H7 | [R] | Spearman reportado |
+| L8 | Usar as ~2.000 questões do OAB fora da calibração | M7 | [E] | erro-padrão ~1,1 ponto |
+| L9 | Teste unitário "zero colunas protegidas = uniforme" (RTN e GPTQ) | G4, M1 | [R] | passa bit a bit |
+| L10 | Trabalhos relacionados e referências completas | G6 | [T] | lista da G6 citada |
+| L11 | Controle de dose no patching de persona | M3 | [E] | intervalo pareado zdiff − controle |
+| L12 | R ≥ 5 realizações por condição (sorteios de calibração no GPTQ; deslocamento aleatório dos blocos de 64 no RTN) | G1–G4 | [E] maior | média ± desvio sobre realizações |
+| L13 | Permutação das opções (já planejada na p. 3) | G1 | [E] | acurácia média sobre 4 rotações |
+| L14 | Segundo modelo (9B da família; um transformer convencional) | M7 | [E] maior | resultados principais replicados |
+
+**Minha conta sobre o número de realizações (aproximada).** Para detectar 3 pontos com 80% de poder a 5%, são necessárias R ≈ (2,8·σ_d/3)² realizações pareadas, com σ_d o desvio da diferença por realização. Com σ_d ≈ 1,2–1,7 ponto (dispersão dos controles sob RTN), R ≈ 2–3: cinco bastam. Com σ ≈ 6 pontos por modelo e sem pareamento (GPTQ, pela Tabela 11), R ≈ 63 por braço. Em acurácia por letra, o experimento de GPTQ é inviável; em KL ou NLL, que variam 0,01–0,04 entre execuções, é viável. É mais um motivo para trocar a métrica antes de rodar L12.
+
+---
+
+## 7. Reposicionamento
+
+O enquadramento, a estrutura do paper, os resumos-modelo e a escada de venues estão no documento `01_proposta_evolucao_paper` (Seções 5, 6 e 8). Esta seção foi retirada desta versão para que haja uma única recomendação.
+
+---
+
+## 8. Pontos menores
+
+- Tabela 9 está na Seção 9 (p. 10), mas pertence à 8.3.
+- "±6 accuracy points" (resumo, p. 3, p. 12) não tem derivação; as diferenças da Tabela 11 são 6,0; 8,8; 14,8.
+- Seção 8.1 reporta 42,4% em 800 questões e a Tabela 9, 43,8% em 600; dizer que são amostras diferentes.
+- "about 1% of the units": no 4B, k = 32 é 0,58% e k = 64 é 1,16%; dizer qual k.
+- A Tabela 13 lista E12 como “circuit beats random, not a dose-based choice”; a redação é ambígua (lê-se que o circuito não é uma escolha por dose). Sugestão: "beats random; does not beat a dose-based choice".
+- Seções 12 (Reproducing) e A (Code map): mover para o README do repositório.
+- O split de honestidade “is unused” e o comentário sobre o rótulo: se não é usado, sai.
+- Falta ao menos uma figura de dados. Candidatas: dispersão ΔNLL × acurácia por condição (H1); histograma dos ganhos dos 30 conjuntos aleatórios com a posição do circuito (G3); D e D relativo contra ΔL por tipo de camada (M5).
+
+---
+
+## 9. O que pode virar inovação a partir da ideia
+
+As direções de evolução estão desenvolvidas no documento `01_proposta_evolucao_paper`.
+
+---
+
+## 10. Limites desta avaliação
+
+- Feita apenas a partir do PDF. Não vi código, json de resultados, logits nem a planilha de fatos.
+- As contagens de respostas trocadas (H2, M1) são aproximações a partir da largura dos intervalos; os valores exatos estão nos arquivos de saída dos autores.
+- A dispersão dos controles (G3) usa os extremos dos sorteios aleatórios porque o valor intermediário não é reportado.
+- As hipóteses de viés de letra, de diferença de avaliação entre GPUs (G1) e de reagrupamento de blocos (M1) são inferências minhas a partir dos números; nenhuma foi verificada.
+- O argumento sobre a tarefa de siglas ser parcialmente ortográfica (G5) é raciocínio sobre a natureza da tarefa, não medição.
+- Literatura, em três níveis de verificação:
+  - **Busquei diretamente e li o resumo ou a ficha:** TaCQ, OWQ, Dutta et al., Ye et al. e a arquitetura do Qwen3.5.
+  - **Apareceram como resultado ou menção em buscas por outro assunto; só vi o trecho retornado, não li o trabalho:** arXiv:2412.15750 e, dentro dele, García-Carrasco et al.; arXiv:2606.19558; 2610.00694; 2607.00908; 2511.06516 (TAQ); GTAQ (IJCAI 2026); 2609.26241; 2611.11079; 2607.17733 (MXSens); 2609.04098; 2607.02893. O que digo sobre eles vem só desses trechos.
+  - **De memória, sem busca:** as marcadas "de memória" (GPTQ, AWQ, SpQR, SqueezeLLM, HAWQ, ZeroQ, HAQ, Zheng et al., Pezeshkpour & Hruschka, Hase et al., ACDC).
+  - Todas as do segundo e do terceiro nível devem ser conferidas na fonte antes de citar. Não fiz revisão sistemática; pode haver outros antecedentes de 2025–2026.

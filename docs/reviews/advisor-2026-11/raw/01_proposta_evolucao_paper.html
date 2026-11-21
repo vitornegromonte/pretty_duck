@@ -1,0 +1,738 @@
+<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'><title>01_proposta_evolucao_paper</title><style>body{font-family:Georgia,serif;max-width:900px;margin:2em auto;padding:0 1em;line-height:1.5}table{border-collapse:collapse}td,th{border:1px solid #999;padding:4px 8px;vertical-align:top}code,pre{background:#f3f3f3}pre{padding:8px;overflow-x:auto}blockquote{border-left:3px solid #999;margin-left:0;padding-left:1em;color:#333}</style></head><body><h1>Proposta de evolução — de "proteger o circuito" para "quanto a consciência de domínio pode render, e que sinal entrega isso"</h1>
+<p>Documento de origem: "Causal circuit discovery for domain-aware low-bit quantization" (PDF de 19 páginas; Qwen3.5-0.8B e 4B; OAB e MMMLU PT-BR).</p>
+<p>Este relatório contém só a proposta de evolução: os motivos, os experimentos e o enquadramento do paper. O diagnóstico que motiva cada ponto está no documento <code>02_avaliacao_critica</code>.</p>
+<p>Convenções:</p>
+<ul>
+<li>"p. N" é a página do PDF de origem. Texto entre aspas curvas é citação literal desse PDF, conferida por script.</li>
+<li>Blocos <strong>Minha conta</strong> são cálculos meus.</li>
+<li>Custo: <strong>[R]</strong> reanálise de saídas que já existem; <strong>[E]</strong> experimento novo (todos forward-only, salvo indicação).</li>
+<li><strong>Nenhum experimento descrito aqui foi executado.</strong> Onde aparece um resultado esperado, é hipótese. Os resumos-modelo trazem <code>[X]</code> no lugar de números.</li>
+<li>Trabalhos vizinhos: salvo indicação, só vi o trecho que a busca retornou. A Seção 11 separa o que foi lido do que não foi.</li>
+</ul>
+<hr />
+<h2>0. A proposta em uma página</h2>
+<p><strong>Mudança de pergunta.</strong> O estudo original pergunta "proteger o circuito do domínio ajuda?". A resposta dos próprios dados é não, e a versão positiva dessa ideia já foi publicada (TaCQ). A pergunta que os dados sustentam, e que não encontrei respondida, é anterior:</p>
+<blockquote>
+<p>Quanto um quantizador pode ganhar por saber o domínio de uso, e que sinal forward-only chega mais perto desse limite?</p>
+</blockquote>
+<p><strong>Três peças, uma história.</strong></p>
+<ol>
+<li><strong>O teto.</strong> Medir o ganho máximo de uma alocação feita para o domínio-alvo sobre uma alocação genérica, em bytes iguais, com piso de ruído explícito, em 4, 3 e 2 bits. Começa como reanálise das tabelas que já existem.</li>
+<li><strong>Por que a localização causal não chega lá.</strong> O patching de pares mínimos acha componentes genericamente críticos, não componentes do domínio. Isso já está nos dados; falta fechar com dois testes baratos.</li>
+<li><strong>O que chega mais perto.</strong> Sensibilidade medida por unidade (cabeça, grupo de 64 neurônios): quantizar cada unidade sozinha e medir a distância ao modelo original. Usa a infraestrutura de intervenção em lote que o estudo já tem.</li>
+</ol>
+<p><strong>Pré-condição.</strong> Nada disso se sustenta sem um arnês de avaliação confiável. Hoje, execuções que o texto chama de equivalentes diferem 8,8 pontos no OAB. A Fase 0 resolve isso antes de qualquer outra coisa.</p>
+<p><strong>Por que este enquadramento é o melhor.</strong> Ele gera um paper publicável nos três desfechos possíveis do teto (Seção 5); transforma os resultados negativos em um limite quantitativo; e é a única parte do espaço que as buscas não mostraram ocupada, num campo que encheu em 2025–2026.</p>
+<p><strong>Mínimo publicável.</strong> Fases 0, 1 e 2 em dois modelos: workshop, TMLR ou venue nacional. Com as Fases 3 e 4: tentativa em trilha principal.</p>
+<hr />
+<h2>1. Ponto de partida</h2>
+<h3>1.1 O que o estudo já tem e deve ser preservado</h3>
+<table>
+<thead>
+<tr>
+<th>Ativo</th>
+<th>Onde</th>
+<th>Por que importa para a proposta</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Intervenção em lote por unidade (cada sequência do lote com uma unidade diferente alterada)</td>
+<td>p. 2, Seção 2.2; p. 19, B.7 (68.096 neurônios por domínio)</td>
+<td>É o motor da Fase 3</td>
+</tr>
+<tr>
+<td>Tabela de sensibilidade medida por camada, por domínio e por formato (186 camadas × 4 domínios × 3 formatos)</td>
+<td>p. 15–16, B.1</td>
+<td>É a matéria-prima da Fase 1</td>
+</tr>
+<tr>
+<td>Evidência de aditividade dos efeitos por camada</td>
+<td>p. 16</td>
+<td>Justifica o plano-oráculo</td>
+</tr>
+<tr>
+<td>Controles de mesmo tamanho, mesma classe e mesma dose</td>
+<td>Tabelas 9, 17, 18</td>
+<td>São o diferencial metodológico</td>
+</tr>
+<tr>
+<td>Bytes exatos por fórmula, conferidos contra tensores</td>
+<td>p. 4</td>
+<td>Permite comparar em bytes iguais</td>
+</tr>
+<tr>
+<td>GPTQ próprio conferido contra o código dos autores no erro por matriz e na NLL</td>
+<td>p. 10</td>
+<td>Quantizador de referência</td>
+</tr>
+<tr>
+<td>Circuitos por pares mínimos com validação em fatos não usados</td>
+<td>Tabelas 7, 15</td>
+<td>Objeto da Fase 2</td>
+</tr>
+<tr>
+<td>Planilha de fatos jurídicos e controle de siglas gerais no mesmo formato</td>
+<td>p. 6</td>
+<td>Teste decisivo da Fase 2</td>
+</tr>
+</tbody>
+</table>
+<h3>1.2 O que não se sustenta e por isso sai do centro</h3>
+<ul>
+<li>O ganho de +3,2 pontos da proteção do circuito legal (Tabela 9) vem de uma realização, com intervalo sobre questões. Quatro dos oito conjuntos-controle com intervalo também excluem zero, dois em cada direção.</li>
+<li>A retratação sob GPTQ (Seção 9.2 do PDF) compara com um uniforme de 49,5%, que está acima do fp16 (43,8%) e 8,8 pontos acima de outra execução do mesmo código.</li>
+<li>A acurácia por letra não acompanha o dano: perdas de NLL de 0,063 e 0,066 nat correspondem a 35,0% e 43,3% no OAB.</li>
+</ul>
+<hr />
+<h2>2. Por que mudar a pergunta: seis argumentos</h2>
+<h3>Argumento 1. A ideia positiva já foi publicada, com gradiente</h3>
+<p>O TaCQ (Xiao, Sung, Stengel-Eskin e Bansal, COLM 2025, arXiv:2504.07389) mantém em precisão alta um conjunto pequeno de pesos identificado como circuito da tarefa e reporta ganhos em 2–3 bits. Um paper cuja tese seja "circuito → proteger" será lido como variante sem gradiente de um método existente, com resultado mais fraco.</p>
+<p>Há um detalhe no resumo do TaCQ que favorece a pergunta nova: os autores relatam um ganho também sem condicionar em tarefa específica. Isso sugere que parte do que o método captura é importância genérica, não de domínio. É a mesma leitura que os dados deste estudo permitem.</p>
+<h3>Argumento 2. Os dados do estudo dizem que a sensibilidade é quase toda compartilhada entre domínios</h3>
+<ul>
+<li>Erros por bloco de matemática e direito: correlação de postos 0,995 (p. 6).</li>
+<li>“Plans barely depend on the target domain” (p. 6).</li>
+<li>“Sensitivity is largely domain-shared” (p. 16): ΔL de matemática e de direito correlacionam 0,58 entre camadas em int4.</li>
+<li>A proteção do circuito legal ajuda direito e não-direito por igual no MMMLU (Tabela 10).</li>
+</ul>
+<p><strong>Minha conta.</strong> O 0,58 é uma correlação entre duas medidas ruidosas: só 44% das células camada-domínio em int4 passam de dois erros-padrão (p. 15). A correlação verdadeira é ρ = r_obs / √(r_xx·r_yy), com r_xx e r_yy as confiabilidades das duas tabelas. Se a confiabilidade for 0,6, ρ ≈ 0,97; se for 0,8, ρ ≈ 0,73; se for 0,9, ρ ≈ 0,64. Não conheço a confiabilidade. A resposta à pergunta "a sensibilidade depende do domínio?" está, portanto, a uma reanálise de distância, e os dois desfechos são informativos.</p>
+<h3>Argumento 3. O que o patching acha são componentes genericamente críticos</h3>
+<ul>
+<li>Quantizar um circuito eleva a NLL de texto neutro muito mais que conjuntos de mesma dose (+4,58 contra +0,20 no exemplo da p. 17). O próprio texto conclui: “so they are generally critical components, not recall-specific ones”.</li>
+<li>Um núcleo de 15 unidades compartilhadas tem necessidade 0,66 a 0,78 nos quatro domínios do 4B (p. 9).</li>
+<li>Há uma razão de desenho: o par mínimo troca um sujeito por outro do mesmo domínio. Tudo o que é comum ao domínio fica igual nas duas execuções e não pode aparecer.</li>
+</ul>
+<p>Consequência: o circuito de recordação não é o seletor certo para um objetivo de domínio. Isso não é um defeito de execução; é o que o método mede.</p>
+<h3>Argumento 4. O sinal que funciona nos dados é o medido, e ele tem uma lacuna de granularidade</h3>
+<p>Em bytes iguais (Tabela 19, +10% de bytes), a fração do dano recuperada é: camadas medidas 61%; dose por unidade 36%; circuito 24%; D por camada 5%; aleatório 8%. E o texto observa: “Unit-level dose does reasonably, which suggests the diagonal error is informative per column and fails when compared across layers.”</p>
+<p>Ou seja: a medição direta vence, mas só existe por camada; a dose tem granularidade fina, mas não é comparável entre camadas. Uma medição direta por unidade junta as duas coisas. O estudo já fez o equivalente computacional (varredura de dezenas de milhares de neurônios).</p>
+<p>Há ainda um fato que o texto trata como curiosidade: as colunas do circuito e as de maior dose quase não se sobrepõem (1 de 4.224 e 19 de 15.040; p. 11). São os dois fatores de um produto: o dano de quantizar um peso é, em primeira ordem, quanto o peso se move vezes quanto a saída depende dele. O estudo mediu os dois separadamente e os comparou como rivais.</p>
+<h3>Argumento 5. O campo encheu, e a parte vazia é a do limite</h3>
+<p>As buscas retornaram, só de 2025–2026, ao menos seis trabalhos sobre quantização consciente de tarefa ou de domínio (Seção 6.3). Nenhum dos trechos que vi reporta um limite superior do ganho de domínio com piso de ruído. Dois deles trazem indícios coerentes com um limite baixo em 4 bits:</p>
+<ul>
+<li>No TAQ (arXiv:2511.06516), 87,5% das atribuições por camada não mudam quando a tarefa de calibração muda.</li>
+<li>Em arXiv:2609.26241 (finanças), a escolha do corpus de calibração importa pouco quando a quantização preserva a capacidade, e os autores recomendam medir o dano antes de construir calibração especializada.</li>
+</ul>
+<p>Um limite medido organiza esses indícios e os resultados positivos em bits baixos numa mesma figura.</p>
+<h3>Argumento 6. O arnês de avaliação atual fabrica e desfaz efeitos</h3>
+<p><strong>Minha conta.</strong> Com 600 questões independentes, o desvio-padrão da diferença de acurácia entre duas realizações equivalentes é no máximo 2,89 pontos. A diferença observada entre duas execuções do mesmo código é 8,8 pontos. Com desvio de ~6 pontos por modelo, detectar 3 pontos com 80% de poder exigiria cerca de 63 realizações por braço. Em acurácia por letra, o programa é inviável; em distância ao fp16 (KL, NLL), que varia centésimos de nat entre execuções, é viável.</p>
+<p>Isso não é só um problema a consertar. Mostrar como um ganho de +3,2 [+1,5; +4,8] aparece e some sob controles é uma contribuição de método que acompanha bem as outras três peças.</p>
+<hr />
+<h2>3. Pergunta, hipóteses e o que cada uma decide</h2>
+<p><strong>Pergunta central.</strong> Quanto um quantizador pode ganhar por saber o domínio de uso, e que sinal forward-only chega mais perto desse limite?</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Hipótese</th>
+<th>Teste</th>
+<th>Se confirmada</th>
+<th>Se refutada</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>H1</td>
+<td>A diferença entre execuções "equivalentes" no OAB tem um fator sistemático identificável (viés de letra ou avaliação), não é ruído por questão</td>
+<td>Fase 0</td>
+<td>Arnês corrigido; possível seção sobre o mecanismo</td>
+<td>O ruído é real: só métricas contínuas e várias realizações</td>
+</tr>
+<tr>
+<td>H2</td>
+<td>Em 4 bits, o ganho de uma alocação por domínio sobre a genérica não passa do piso de ruído; em 3 e 2 bits, passa</td>
+<td>Fase 1</td>
+<td>Ramo A do paper (Seção 5)</td>
+<td>Ramo B (teto alto já em 4 bits) ou C (nulo em todos)</td>
+</tr>
+<tr>
+<td>H3</td>
+<td>Circuitos de recordação são componentes genéricos: o circuito legal e o de siglas gerais são, em boa parte, o mesmo, e protegê-los não supera dose de mesmo tamanho</td>
+<td>Fase 2</td>
+<td>Resultado negativo fechado, com explicação</td>
+<td>A proteção por circuito volta a ser candidata; rever</td>
+</tr>
+<tr>
+<td>H4</td>
+<td>Sensibilidade medida por unidade supera, em bytes iguais, a medida por camada e a dose por unidade</td>
+<td>Fase 3</td>
+<td>Peça construtiva do paper</td>
+<td>A granularidade fina não paga; fica o teto e o negativo</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>4. Programa experimental</h2>
+<p>Ordem por dependência. Cada fase tem um critério de decisão; a seguinte só começa depois dele.</p>
+<h3>Fase 0 — Arnês de avaliação confiável</h3>
+<p><strong>Por quê.</strong> Todas as comparações posteriores dependem de uma medida de dano que não oscile mais que o efeito procurado.</p>
+<h4>E0.1 Mesmos pesos, duas máquinas [E, minutos]</h4>
+<ul>
+<li><strong>Desenho.</strong> Salvar o state dict quantizado (GPTQ int4) em uma GPU; carregá-lo na outra; avaliar as mesmas 600 questões com lote = 1 e o mesmo dtype. Fazer o mesmo com o fp16.</li>
+<li><strong>Decide.</strong> Se o mesmo arquivo de pesos der acurácias diferentes, o problema é de avaliação (padding, lote, precisão). Se der a mesma, a diferença nasce na quantização.</li>
+<li><strong>Critério.</strong> Mesma acurácia ±1 questão para o mesmo arquivo.</li>
+</ul>
+<h4>E0.2 Letras previstas e acurácia sem viés de letra [R se os logits foram salvos; senão E]</h4>
+<ul>
+<li><strong>Desenho.</strong> Para cada condição das Tabelas 9, 11 e 12 do PDF: histograma das letras previstas e do gabarito; acurácia após subtrair o log-prior médio por letra, estimado em questões fora das 600; acurácia média sobre as 4 rotações das opções.</li>
+<li><strong>Decide.</strong> Se 27,2% (melhor NLL da Tabela 12) corresponder a prever quase sempre a mesma letra, H1 está confirmada no mecanismo.</li>
+<li><strong>Critério.</strong> Tabela por condição; a dispersão entre execuções equivalentes cai para dentro do limite de 2,9 pontos após a correção, ou não cai e isso é reportado.</li>
+</ul>
+<h4>E0.3 Métricas e unidade de repetição [E]</h4>
+<ul>
+<li><strong>Métrica primária.</strong> KL(p_fp16 ‖ p_q) média por token em texto de domínio fora da calibração. Para múltipla escolha, KL sobre a distribuição das quatro letras.</li>
+<li><strong>Secundárias.</strong> NLL; diferença de logit (LD) em pares mínimos de fatos não usados; fração de respostas trocadas em relação ao fp16, separada em melhorou/piorou. Acurácia só com rotação de opções.</li>
+<li><strong>Realizações.</strong> No GPTQ, R sorteios de calibração com semente registrada. No RTN, que é determinístico, R deslocamentos aleatórios dos blocos de 64 colunas (ou permutações de colunas antes do agrupamento): são quantizadores equivalentes que só diferem no alinhamento dos grupos.</li>
+<li><strong>Análise.</strong> Decomposição da variância em questões/linhas e realizações; toda comparação entre condições é pareada por realização.</li>
+</ul>
+<p><strong>Minha conta.</strong> Com desvio da diferença por realização de 1,2 a 1,7 ponto (dispersão dos controles sob RTN na Tabela 9), detectar 3 pontos pede R ≈ 1,3 a 2,5; R = 5 dá folga. Usar as ~2.000 questões do OAB fora da calibração baixa o erro-padrão por modelo de 2,04 para ~1,12 ponto.</p>
+<h4>E0.4 Teste unitário de identidade [R]</h4>
+<p>Proteger um conjunto vazio pelo caminho de código "protegido" deve reproduzir o uniforme bit a bit, em RTN e em GPTQ, para unidades contíguas e para colunas espalhadas. Resolve a dúvida sobre reagrupamento dos blocos e sobre a queda de 9 a 13 pontos com proteção aleatória sob GPTQ.</p>
+<p><strong>Critério de decisão da Fase 0.</strong> Existe uma métrica primária cujo desvio entre realizações é pelo menos três vezes menor que o efeito do int4 uniforme. Se não existir em 4 bits, o programa passa a operar em 3 bits, onde o dano é maior (Tabela 12).</p>
+<p><strong>Esboço de código (E0.1–E0.3).</strong></p>
+<pre><code class="language-python">torch.save({k: v.cpu() for k, v in model.state_dict().items()}, &quot;q.pt&quot;)      # GPU A
+model.load_state_dict(torch.load(&quot;q.pt&quot;))                                    # GPU B
+logits = eval_letters(model, questions, batch_size=1)                        # [N, 4]
+
+pred = logits.argmax(1)
+hist_pred, hist_gold = np.bincount(pred, minlength=4), np.bincount(gold, minlength=4)
+prior = logp_out_of_sample.mean(0)
+acc_debiased = ((logits.log_softmax(1) - prior).argmax(1) == gold).float().mean()
+
+kl = (p_fp16 * (p_fp16.log() - p_q.log())).sum(-1).mean()                    # métrica primária
+improved = ((pred == gold) &amp; (pred_fp16 != gold)).sum()
+worsened = ((pred != gold) &amp; (pred_fp16 == gold)).sum()
+</code></pre>
+<hr />
+<h3>Fase 1 — O teto do ganho de domínio</h3>
+<p><strong>Por quê.</strong> É a peça central e a mais barata: começa com dados que já existem e define o ramo do paper.</p>
+<h4>E1.1 Confiabilidade e correlação corrigida [R]</h4>
+<ul>
+<li><strong>Dados.</strong> As tabelas ΔL por camada, domínio e formato do 0.8B (64 linhas por domínio, pareadas por linha).</li>
+<li><strong>Desenho.</strong> Dividir as 64 linhas em duas metades, muitas vezes; correlacionar os perfis por camada das duas metades; corrigir por Spearman–Brown (r = 2r_½/(1+r_½)); obter r_xx por domínio e formato. Calcular ρ = r_xy/√(r_xx·r_yy) entre pares de domínios, com bootstrap sobre linhas.</li>
+<li><strong>Decide.</strong> ρ perto de 1: a ordenação das camadas é a mesma entre domínios. ρ claramente abaixo de 1: há estrutura de domínio na sensibilidade.</li>
+</ul>
+<h4>E1.2 Plano-oráculo contra plano genérico, com piso de ruído [R → E]</h4>
+<ul>
+<li><strong>Desenho.</strong> Para o domínio-alvo T e orçamento B de bytes extras (+1, +2, +5, +10%):</li>
+<li>plano_T: alocação pela tabela medida em T (metade A das linhas);</li>
+<li>plano_G: alocação pela média dos outros domínios (sem T);</li>
+<li>plano_T′: alocação pela tabela medida em T (metade B).</li>
+<li>Avaliar os três em linhas de T não usadas em nenhuma tabela.</li>
+<li><strong>Medidas.</strong> Ganho de domínio G(T,B) = [dano(plano_G) − dano(plano_T)] / dano(uniforme). Piso de ruído G₀(T,B) = mesma expressão com plano_T′ no lugar de plano_G. O teto é G − G₀.</li>
+<li><strong>Por que o piso.</strong> Dois planos feitos com amostras diferentes do mesmo domínio também diferem. Sem G₀, qualquer diferença entre plano_T e plano_G seria lida como efeito de domínio. O próprio PDF reconhece o risco: “The advantage on NLL is partly in-distribution”.</li>
+<li><strong>Primeiro passo [R].</strong> Ganho previsto pela aditividade, sem rodar nada. <strong>Segundo passo [E].</strong> Ganho medido, aplicando os planos.</li>
+</ul>
+<h4>E1.3 Onde o teto pode aparecer: bits e distância de domínio [E]</h4>
+<ul>
+<li><strong>Bits.</strong> Repetir a tabela medida com int3 e int2 como formatos. É onde o dano é grande e onde o TaCQ reporta ganhos.</li>
+<li><strong>Distância.</strong> Os quatro domínios atuais são disciplinas do MMLU em inglês, próximas entre si. Acrescentar: texto jurídico em português (enunciados do OAB fora da avaliação, legislação), texto geral em português, e código. A mudança de língua é o deslocamento mais forte disponível e é o caso de uso do estudo.</li>
+<li><strong>Modelo.</strong> Repetir no 4B.</li>
+</ul>
+<p><strong>Critério de decisão da Fase 1.</strong> Uma tabela teto(bits, distância de domínio) com intervalos. Ela escolhe o ramo (Seção 5).</p>
+<p><strong>O que vai para o paper.</strong> Figura principal: teto em função dos bits, uma curva por distância de domínio, com a faixa do piso de ruído. Tabela: ρ corrigida por par de domínios.</p>
+<p><strong>Esboço de código (E1.1–E1.2).</strong></p>
+<pre><code class="language-python">def reliability(dL, n_splits=200):                 # dL: [camadas, linhas], um domínio
+    r = []
+    for _ in range(n_splits):
+        idx = np.random.permutation(dL.shape[1]); a, b = idx[::2], idx[1::2]
+        rh = spearmanr(dL[:, a].mean(1), dL[:, b].mean(1)).statistic
+        r.append(2 * rh / (1 + rh))
+    return np.mean(r)
+
+rho_true = spearmanr(dL_T.mean(1), dL_U.mean(1)).statistic / np.sqrt(reliability(dL_T) * reliability(dL_U))
+
+plan_T  = allocate(table=dL_T[:, half_A].mean(1), budget=B)
+plan_G  = allocate(table=np.mean([dL_d.mean(1) for d in others], 0), budget=B)
+plan_T2 = allocate(table=dL_T[:, half_B].mean(1), budget=B)
+G  = (damage(plan_G,  T_heldout) - damage(plan_T, T_heldout)) / damage(uniform, T_heldout)
+G0 = (damage(plan_T2, T_heldout) - damage(plan_T, T_heldout)) / damage(uniform, T_heldout)
+</code></pre>
+<hr />
+<h3>Fase 2 — O que a localização causal acha, e por que não é o domínio</h3>
+<p><strong>Por quê.</strong> Fecha o resultado negativo com explicação, em vez de deixá-lo como ganho que sumiu.</p>
+<h4>E2.1 Circuito legal × circuito de siglas gerais [R]</h4>
+<ul>
+<li><strong>Desenho.</strong> Necessidade e suficiência do circuito legal nos pares de siglas gerais e do circuito de siglas gerais nos pares legais; Jaccard dos dois conjuntos em vários k; bootstrap sobre pares.</li>
+<li><strong>Decide.</strong> Necessidade cruzada alta: o circuito é de expansão de sigla, não de direito.</li>
+<li><strong>Complemento.</strong> Contar os primeiros tokens distintos entre os fatos legais e a fração de pares em que a resposta começa com a inicial da sigla. Mede o quanto a tarefa é ortográfica.</li>
+</ul>
+<h4>E2.2 Intervalos para todas as suficiências e necessidades [R]</h4>
+<p>Bootstrap sobre pares nas Tabelas 7, 8, 15 e 16 do PDF. Com 13 a 15 pares, é obrigatório.</p>
+<h4>E2.3 Criticidade genérica dos circuitos [E]</h4>
+<ul>
+<li><strong>Desenho.</strong> Para cada circuito (quatro domínios, legal, siglas gerais) e k ∈ {16, 32, 64}: quantizar só as colunas do circuito e medir KL em texto neutro e em texto do domínio; comparar com conjuntos aleatórios de mesma classe, mesma profundidade e dose mais próxima.</li>
+<li><strong>Medida.</strong> Razão de especificidade = KL(domínio)/KL(neutro), para circuito e para controle.</li>
+<li><strong>Decide.</strong> Razão do circuito indistinguível da do controle: o circuito é genérico (H3).</li>
+</ul>
+<h4>E2.4 Proteção com distribuição nula [E]</h4>
+<ul>
+<li><strong>Desenho.</strong> Em RTN e GPTQ, 4 e 3 bits, nos dois tamanhos: circuito legal; dose de mesmo tamanho (estilo OWQ); produto dose × suficiência; 30 conjuntos aleatórios de mesma classe e profundidade; R = 5 realizações. Métrica primária da Fase 0.</li>
+<li><strong>Análise.</strong> Posição do circuito na distribuição dos aleatórios (p de permutação), pareada por realização; diferença circuito − dose com intervalo sobre realizações.</li>
+<li><strong>Decide.</strong> H3 confirmada se o circuito não superar a dose e ficar dentro da distribuição nula na métrica contínua.</li>
+</ul>
+<h4>E2.5 Pares entre domínios [E, opcional]</h4>
+<p>Mesmo template, sujeito jurídico contra sujeito não jurídico. É o desenho que poderia isolar componentes de domínio. Se também achar só o núcleo compartilhado, o argumento 3 fica completo.</p>
+<p><strong>O que vai para o paper.</strong> Uma tabela legal × siglas gerais; uma figura com o histograma dos 30 aleatórios e a posição de circuito, dose e produto; um parágrafo sobre o que o par mínimo pode e não pode ver.</p>
+<hr />
+<h3>Fase 3 — Sensibilidade medida por unidade</h3>
+<p><strong>Por quê.</strong> É a peça construtiva. Responde "que sinal chega mais perto do teto" com algo que o estudo sabe fazer.</p>
+<h4>Definição</h4>
+<p>Para a unidade u (cabeça ou grupo de 64 neurônios de uma projeção de escrita W) e o domínio d:</p>
+<p>s_u(d) = E_{x∼d} KL( p_fp16(·|x) ‖ p_{Q_u}(·|x) ),</p>
+<p>onde Q_u é o modelo com apenas as colunas de u quantizadas. Como W·h com as colunas de u quantizadas é igual a W·h − E_u·h_u, com E_u = W_u − Ŵ_u, a intervenção é um hook que subtrai E_u·h_u da saída. Cada sequência do lote pode receber uma unidade diferente. Como as unidades estão alinhadas aos blocos de 64 colunas, as escalas dos demais blocos não mudam e a equivalência é exata.</p>
+<pre><code class="language-python"># E[u] = W[:, cols_u] - Wq[:, cols_u], pré-computado; uma unidade diferente por sequência do lote
+def hook(module, inputs, output):
+    h = inputs[0]                                          # [B, T, i]
+    for b, u in enumerate(units_in_batch):
+        output[b] -= h[b][:, cols[u]] @ E[u].T             # = quantizar só as colunas de u
+    return output
+</code></pre>
+<h4>E3.1 Varredura [E]</h4>
+<ul>
+<li><strong>Desenho.</strong> 0.8B: 1.680 unidades, pontuadas em int3 (intervenção forte), 64 linhas por domínio, dois domínios (alvo e geral). São 107.520 pares unidade-linha por domínio; o estudo já varreu 68.096 neurônios por domínio.</li>
+<li><strong>Obstáculo previsto.</strong> O efeito de uma camada inteira em int4 já tem mediana de |ΔL| ≤ 0,001 nat (p. 15). Por unidade será menor.</li>
+<li><strong>Remédios.</strong> KL em vez de diferença de NLL (pareada e não negativa); pontuar em int3 ou int2; varredura hierárquica (camada primeiro, unidades só nas camadas que concentram o dano; as 10 piores camadas carregam 52% do dano positivo em int4, p. 16).</li>
+</ul>
+<h4>E3.2 Aditividade no nível de unidade [E]</h4>
+<p>Como em B.1 do PDF: para planos aleatórios de 8, 32 e 128 unidades, comparar a soma dos efeitos individuais com o efeito conjunto, no mesmo texto e em texto separado. Sem aditividade aproximada, a alocação por soma não se justifica.</p>
+<h4>E3.3 Comparação em bytes iguais [E]</h4>
+<p>Seletores, todos avaliados no arranjo da Tabela 19 do PDF (texto separado, R = 5, métrica primária):</p>
+<table>
+<thead>
+<tr>
+<th>Seletor</th>
+<th>Granularidade</th>
+<th>Precisa de</th>
+<th>Papel</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Aleatório de mesma classe</td>
+<td>unidade</td>
+<td>nada</td>
+<td>piso</td>
+</tr>
+<tr>
+<td>D por camada</td>
+<td>camada</td>
+<td>estatísticas</td>
+<td>negativo conhecido</td>
+</tr>
+<tr>
+<td>Dose por unidade (estilo OWQ)</td>
+<td>unidade</td>
+<td>estatísticas</td>
+<td>baseline forte e barato</td>
+</tr>
+<tr>
+<td>Camadas medidas</td>
+<td>camada</td>
+<td>1 forward por camada</td>
+<td>melhor atual</td>
+</tr>
+<tr>
+<td>Circuito de recordação</td>
+<td>unidade</td>
+<td>patching</td>
+<td>hipótese original</td>
+</tr>
+<tr>
+<td>Dose × suficiência</td>
+<td>unidade</td>
+<td>já calculados</td>
+<td>teste barato da leitura "dois fatores"</td>
+</tr>
+<tr>
+<td>Dose calibrada (escala medida da camada × dose da unidade)</td>
+<td>unidade</td>
+<td>camadas medidas + estatísticas</td>
+<td>híbrido de custo quase zero</td>
+</tr>
+<tr>
+<td><strong>Unidades medidas</strong></td>
+<td>unidade</td>
+<td>1 forward por unidade</td>
+<td>proposta</td>
+</tr>
+<tr>
+<td>Fisher diagonal agregado por unidade (com gradiente)</td>
+<td>unidade</td>
+<td>backward</td>
+<td>referência superior, opcional</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>Medida.</strong> Fração do dano do uniforme recuperada por orçamento; e fração do teto da Fase 1 alcançada.</li>
+<li><strong>Decide.</strong> H4 confirmada se "unidades medidas" superar "camadas medidas" e "dose por unidade" em ao menos dois orçamentos, com intervalo sobre realizações que exclua zero.</li>
+<li><strong>Critério de abandono.</strong> Se não superar "camadas medidas" em nenhum orçamento, a peça construtiva passa a ser a "dose calibrada" (se funcionar) ou sai do paper.</li>
+</ul>
+<h4>E3.4 Versão por domínio [E]</h4>
+<p>Repetir a análise da Fase 1 com a tabela por unidade: plano por unidades de T contra plano por unidades genérico, com piso de ruído. Diz se a granularidade fina revela estrutura de domínio que a camada esconde.</p>
+<h4>E3.5 Custo [E]</h4>
+<p>Tabela com tempo e pico de memória de cada seletor no 0.8B e no 4B, incluindo o de gradiente. O argumento forward-only só vale se vier com números.</p>
+<p><strong>O que vai para o paper.</strong> Uma figura de dano recuperado por orçamento, uma curva por seletor; uma tabela de custo; a figura de aditividade.</p>
+<hr />
+<h3>Fase 4 — Generalização</h3>
+<p><strong>Por quê.</strong> "Uma família, um modelo" é a objeção mais provável.</p>
+<ul>
+<li><strong>Modelos.</strong> O 4B e o 9B da mesma família; e ao menos um transformer convencional de 1 a 4 bilhões de parâmetros de outra família. A arquitetura híbrida do Qwen3.5 tem trabalho próprio de quantização em 2026, então precisa ser tratada como um caso, não como o caso.</li>
+<li><strong>Quantizadores.</strong> RTN e GPTQ com clipping, em 4, 3 e 2 bits.</li>
+<li><strong>O que se repete.</strong> Fase 1 completa; E2.4; E3.3 com os quatro seletores principais.</li>
+<li><strong>Critério.</strong> O sinal do teto e a ordenação dos seletores se mantêm em pelo menos dois de três modelos; onde não se mantêm, isso é reportado como limite.</li>
+</ul>
+<h3>Fase 5 (opcional) — TaCQ no mesmo arnês</h3>
+<p>Rodar o código público do TaCQ em um modelo, com a métrica primária, R realizações e os controles de mesmo tamanho. Requer gradiente. Dá ao paper a comparação que um revisor de quantização vai pedir e testa se o ganho relatado em bits baixos corresponde ao teto medido na Fase 1.</p>
+<hr />
+<h2>5. Árvore de decisão: desfecho → paper</h2>
+<table>
+<thead>
+<tr>
+<th>Ramo</th>
+<th>Desfecho da Fase 1</th>
+<th>Tese</th>
+<th>Papel das Fases 2 e 3</th>
+<th>Força</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>A</strong></td>
+<td>Teto dentro do piso em 4 bits; cresce em 3 e 2 bits</td>
+<td>A consciência de domínio só rende onde o dano é grande; em 4 bits o ganho disponível é genérico</td>
+<td>Fase 2 explica por que circuitos não ajudam; Fase 3 dá o melhor seletor genérico e mostra quanto do teto de bits baixos ele alcança</td>
+<td>A mais forte: reconcilia resultados negativos e positivos da literatura numa figura</td>
+</tr>
+<tr>
+<td><strong>B</strong></td>
+<td>Teto claro já em 4 bits</td>
+<td>Há ganho de domínio disponível e os seletores atuais não o capturam</td>
+<td>Fase 3 vira o método; Fase 2 vira o contraste ("localizar não é medir")</td>
+<td>Paper de método; exige Fase 5</td>
+</tr>
+<tr>
+<td><strong>C</strong></td>
+<td>Teto dentro do piso em todos os bits e distâncias</td>
+<td>Sob alocação de precisão mista, não há ganho de domínio mensurável nestes modelos</td>
+<td>Fase 2 e 3 como evidência convergente</td>
+<td>Negativo forte; Findings, TMLR, workshop</td>
+</tr>
+</tbody>
+</table>
+<p>A Fase 0 acrescenta, em qualquer ramo, a seção "como um ganho aparece e some". Se H1 se confirmar pelo viés de letra, há material para um artigo curto separado sobre recalibração do viés após quantização, que não deve ser misturado ao principal.</p>
+<p>Minha expectativa, sem dado que a garanta, é o ramo A. Os indícios são a correlação 0,995 por bloco, os planos que não mudam com o domínio, e os ganhos do TaCQ estarem em 2–3 bits.</p>
+<hr />
+<h2>6. Enquadramento recomendado</h2>
+<h3>6.1 Tese em uma frase</h3>
+<blockquote>
+<p>Em quantização de baixo número de bits, saber o domínio de uso rende no máximo <code>[X]</code>% do dano em 4 bits e <code>[Y]</code>% em 2–3 bits; componentes localizados por patching causal não capturam esse ganho porque são genericamente críticos; a sensibilidade medida por unidade, sem gradiente, alcança <code>[Z]</code>% do limite.</p>
+</blockquote>
+<h3>6.2 Título</h3>
+<ul>
+<li>Recomendado: <strong>"How Much Can Domain Awareness Buy in Low-Bit LLM Quantization? A Ceiling Analysis with Causal Controls"</strong></li>
+<li>Alternativa se o ramo for B: "Measure, Don't Localize: Forward-Only Unit Sensitivity for Mixed-Precision LLM Quantization"</li>
+<li>Alternativa se o ramo for C: "Localization Is Not Sensitivity: Causal Circuits Do Not Tell Us Which Weights to Protect"</li>
+</ul>
+<p>O título atual ("Causal circuit discovery for domain-aware low-bit quantization") promete o método que os dados não sustentam e deve sair.</p>
+<h3>6.3 Posição diante dos vizinhos</h3>
+<table>
+<thead>
+<tr>
+<th>Trabalho</th>
+<th>O que faz (pelo que vi)</th>
+<th>Como o paper se diferencia</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TaCQ, arXiv:2504.07389, COLM 2025</td>
+<td>Circuito de pesos por gradiente, mantido em 16 bits; ganhos em 2–3 bits; ganho também sem condicionar em tarefa</td>
+<td>Mede o limite do ganho de domínio em vez de propor outro seletor; sem gradiente; controles de mesmo tamanho e mesma dose</td>
+</tr>
+<tr>
+<td>TAQ, arXiv:2511.06516</td>
+<td>Alocação por camada sem treino, condicionada à tarefa; 87,5% das atribuições estáveis entre tarefas</td>
+<td>Quantifica o que essa estabilidade implica como ganho disponível; desce à unidade</td>
+</tr>
+<tr>
+<td>OWQ, arXiv:2306.02272, AAAI 2024</td>
+<td>Colunas sensíveis por Hessiana diagonal × erro, mantidas em FP16</td>
+<td>É o baseline "dose"; deve ser nomeado assim</td>
+</tr>
+<tr>
+<td>MXSens, arXiv:2607.17733</td>
+<td>Sensibilidade por camada quantizada isoladamente</td>
+<td>Precedente da tabela por camada; a contribuição é a unidade e a análise por domínio</td>
+</tr>
+<tr>
+<td>arXiv:2609.26241 (finanças)</td>
+<td>Calibração por domínio só ajuda quando o dano é grande</td>
+<td>Vizinho mais próximo do ramo A; a diferença é alocação/proteção com teto e piso de ruído, não dados de calibração. <strong>Ler antes de fixar a tese</strong></td>
+</tr>
+<tr>
+<td>arXiv:2607.00908; arXiv:2611.11079; GTAQ (IJCAI 2026)</td>
+<td>Calibração e alocação conscientes de tarefa</td>
+<td>Mesmo comentário: são métodos; o paper é a medida do espaço em que eles operam</td>
+</tr>
+<tr>
+<td>Dutta et al., arXiv:2407.09141, NeurIPS 2024</td>
+<td>Flips e KL como métricas de modelos comprimidos</td>
+<td>Adota as métricas; acrescenta a distribuição nula sobre conjuntos protegidos e a variância entre realizações</td>
+</tr>
+<tr>
+<td>arXiv:2606.19558, "Displacement Is Not Direction: Evaluating Fidelity Metrics for Quantized LLM Deployment"</td>
+<td>Pelo trecho retornado na busca sobre Dutta et al.: avalia se métricas de fidelidade servem para escolher entre modelos quantizados; separa flips em ganhos e perdas</td>
+<td>Ler para não reivindicar o que já foi dito na parte de avaliação</td>
+</tr>
+<tr>
+<td>arXiv:2610.00694, "How Divergence Becomes Decision Flips in Compressed Language Models"</td>
+<td>Pelo trecho retornado na mesma busca: relaciona divergência e taxa de flips em modelos comprimidos</td>
+<td>Idem</td>
+</tr>
+<tr>
+<td>Hase et al., "Does Localization Inform Editing?" <em>(de memória)</em></td>
+<td>Localização por causal tracing não prediz onde editar</td>
+<td>Análogo conceitual para a Fase 2; citar como precedente do tipo de resultado</td>
+</tr>
+</tbody>
+</table>
+<h3>6.4 Contribuições, na ordem em que o paper deve listá-las</h3>
+<ol>
+<li>Um limite superior, com piso de ruído, do ganho de alocação por domínio em 2, 3 e 4 bits, em <code>[N]</code> modelos e em deslocamentos de disciplina, de língua e de tipo de texto.</li>
+<li>Evidência de que circuitos localizados por patching de pares mínimos são genericamente críticos e não superam uma escolha por dose de mesmo tamanho; e a razão de desenho para isso.</li>
+<li>Um seletor forward-only por unidade, medido diretamente, comparado em bytes iguais com sete alternativas, com custo reportado.</li>
+<li>Um protocolo de avaliação (distância ao modelo original, distribuição nula sobre conjuntos, várias realizações) e um caso documentado em que o protocolo usual produz um ganho de +3,2 pontos que não sobrevive.</li>
+</ol>
+<h3>6.5 Estrutura em 9 páginas</h3>
+<ol>
+<li><strong>Introdução</strong> (1 p.). A pergunta; a figura do teto como Figura 1.</li>
+<li><strong>Trabalhos relacionados</strong> (0,75 p.). Tabela da 6.3 em prosa.</li>
+<li><strong>Protocolo</strong> (1,25 p.). Quantizador, bytes exatos, métrica primária, realizações, controles.</li>
+<li><strong>O teto do ganho de domínio</strong> (1,75 p.). Fase 1.</li>
+<li><strong>O que a localização causal acha</strong> (1,5 p.). Fase 2.</li>
+<li><strong>Sensibilidade medida por unidade</strong> (1,5 p.). Fase 3.</li>
+<li><strong>Como um ganho aparece e some</strong> (0,75 p.). Fase 0 e o caso do +3,2.</li>
+<li><strong>Limitações</strong> (0,5 p.).</li>
+</ol>
+<p>Apêndice: TARC, ablação pela média, D por camada e persona como negativos menores em uma tabela; detalhes de GPTQ; fatos jurídicos; reprodução. As Seções 12 e A do PDF vão para o repositório.</p>
+<h3>6.6 Figuras e tabelas</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Conteúdo</th>
+<th>Fonte</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Fig. 1</td>
+<td>Teto do ganho de domínio por bits, uma curva por distância de domínio, faixa do piso de ruído</td>
+<td>E1.2, E1.3</td>
+</tr>
+<tr>
+<td>Fig. 2</td>
+<td>Histograma dos ganhos de 30 conjuntos aleatórios, com circuito, dose e produto marcados</td>
+<td>E2.4</td>
+</tr>
+<tr>
+<td>Fig. 3</td>
+<td>Dano recuperado por orçamento de bytes, uma curva por seletor</td>
+<td>E3.3</td>
+</tr>
+<tr>
+<td>Fig. 4</td>
+<td>ΔNLL contra acurácia por letra, por condição, antes e depois da correção de viés</td>
+<td>E0.2</td>
+</tr>
+<tr>
+<td>Fig. 5</td>
+<td>Soma dos efeitos por unidade contra efeito conjunto</td>
+<td>E3.2</td>
+</tr>
+<tr>
+<td>Tab. 1</td>
+<td>Correlação entre domínios, bruta e corrigida pela confiabilidade</td>
+<td>E1.1</td>
+</tr>
+<tr>
+<td>Tab. 2</td>
+<td>Circuito legal × siglas gerais: necessidade, suficiência, Jaccard</td>
+<td>E2.1</td>
+</tr>
+<tr>
+<td>Tab. 3</td>
+<td>Custo (tempo, memória) por seletor</td>
+<td>E3.5</td>
+</tr>
+<tr>
+<td>Tab. 4</td>
+<td>Replicação por modelo</td>
+<td>Fase 4</td>
+</tr>
+</tbody>
+</table>
+<p>O PDF atual tem 19 tabelas e uma figura esquemática. Um paper com essa tese precisa que o leitor veja o teto em uma imagem.</p>
+<h3>6.7 Resumos-modelo (preencher só com resultados obtidos)</h3>
+<p><strong>Ramo A.</strong></p>
+<blockquote>
+<p>Task-aware quantization methods keep the weights that matter for a target domain at higher precision. We ask how much there is to gain. Using directly measured sensitivities and exact byte accounting, we compare allocations built for a target domain with allocations built without it, against a noise floor given by two allocations built from disjoint samples of the same domain. On <code>[N]</code> models, the domain-specific gain is within the noise floor at 4 bits and reaches <code>[Y]</code>% of the uniform-quantization damage at 2–3 bits, and it grows with domain distance (<code>[...]</code>). Components localized by minimal-pair causal patching do not capture this gain: they are critical for the model in general, a circuit for legal acronyms largely coincides with one for non-legal acronyms, and protecting them does not beat a same-size choice by quantization error. A forward-only sensitivity measured per unit recovers <code>[Z]</code>% of the available gain at equal bytes. We also document how a single-realization accuracy comparison yields a 3.2-point gain with a confidence interval excluding zero that does not survive a null distribution over protected sets.</p>
+</blockquote>
+<p><strong>Ramo B.</strong> Trocar a segunda metade por: o teto em 4 bits é <code>[X]</code>%; seletores por dose e por camada alcançam <code>[...]</code>%; o seletor por unidade alcança <code>[Z]</code>%, a <code>[...]</code> do custo de memória de um seletor por gradiente.</p>
+<p><strong>Ramo C.</strong> Trocar por: o ganho fica dentro do piso em todos os bits e distâncias testados; listar o que isso exclui e o que não exclui (granularidade de peso, quantização de ativações, modelos maiores).</p>
+<hr />
+<h2>7. Objeções previsíveis e resposta preparada</h2>
+<table>
+<thead>
+<tr>
+<th>Objeção</th>
+<th>Resposta que o paper precisa ter</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"Uma família de modelos, modelos pequenos"</td>
+<td>Fase 4; declarar o intervalo de tamanhos como limite</td>
+</tr>
+<tr>
+<td>"O teto não é um limite superior de verdade; é o ótimo de uma busca gulosa sobre uma tabela aditiva"</td>
+<td>Chamar de "oráculo dentro da família de alocações por camada/unidade"; mostrar a aditividade (E3.2); conferir com busca exaustiva em subconjuntos pequenos</td>
+</tr>
+<tr>
+<td>"Os domínios são parecidos"</td>
+<td>E1.3: língua e código</td>
+</tr>
+<tr>
+<td>"KL esconde o efeito na tarefa"</td>
+<td>Reportar também LD em fatos e acurácia com rotação de opções e R realizações; mostrar a Fig. 4</td>
+</tr>
+<tr>
+<td>"Por que sem gradiente?"</td>
+<td>Tab. 3 com memória e tempo; referência com gradiente em ao menos um modelo</td>
+</tr>
+<tr>
+<td>"Faltou comparar com TaCQ"</td>
+<td>Fase 5, ou ao menos um modelo; se não for feito, dizer que o paper mede o espaço, não compete no método, e mostrar onde os ganhos relatados pelo TaCQ caem na Fig. 1</td>
+</tr>
+<tr>
+<td>"Quantização simulada, sem formato nem aceleração"</td>
+<td>Declarar; argumentar que unidades são blocos contíguos, mais simples de empacotar que pesos ou colunas espalhadas. Um trecho de busca (QEFT, arXiv:2410.08661) aponta dificuldade de implantação do formato misto do OWQ. É argumento, não demonstração</td>
+</tr>
+<tr>
+<td>"Resultado negativo"</td>
+<td>O teto converte o negativo em número; a Fase 3 é construtiva</td>
+</tr>
+<tr>
+<td>"O efeito por unidade é ruído"</td>
+<td>Confiabilidade split-half da tabela por unidade; varredura hierárquica; pontuação em int3</td>
+</tr>
+<tr>
+<td>"A planilha jurídica não foi revisada"</td>
+<td>Revisão por jurista antes da submissão; licença do conjunto de exames esclarecida</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>8. Venues e mínimo publicável</h2>
+<table>
+<thead>
+<tr>
+<th>Pacote</th>
+<th>Conteúdo</th>
+<th>Destino realista</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Mínimo</td>
+<td>Fases 0, 1 (com E1.3 em dois modelos) e 2</td>
+<td>Workshop de eficiência ou de interpretabilidade em conferência grande; TMLR; PROPOR, STIL ou BRACIS se o recorte for português jurídico</td>
+</tr>
+<tr>
+<td>Completo</td>
+<td>+ Fases 3 e 4</td>
+<td>Trilha principal de NeurIPS/ICML/ICLR ou ACL/EMNLP (Findings como piso provável no ramo C)</td>
+</tr>
+<tr>
+<td>Completo com comparação</td>
+<td>+ Fase 5</td>
+<td>Melhora a chance em trilha principal no ramo B</td>
+</tr>
+</tbody>
+</table>
+<p>Não confirmei prazos nem chamadas de 2027.</p>
+<hr />
+<h2>9. Riscos</h2>
+<table>
+<thead>
+<tr>
+<th>Risco</th>
+<th>Sinal de alerta</th>
+<th>Mitigação</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Um dos trabalhos de 2026 já reporta um teto equivalente</td>
+<td>Leitura de arXiv:2609.26241, 2611.11079 e 2607.00908</td>
+<td>Ler antes da Fase 1 medida; se houver, o diferencial passa a ser o piso de ruído, a unidade e os controles causais</td>
+</tr>
+<tr>
+<td>A Fase 0 não acha métrica estável em 4 bits</td>
+<td>Desvio entre realizações da mesma ordem do efeito</td>
+<td>Operar em 3 bits; reportar 4 bits como "não mensurável neste arnês"</td>
+</tr>
+<tr>
+<td>Efeito por unidade abaixo do ruído</td>
+<td>Confiabilidade split-half baixa em E3.1</td>
+<td>Hierarquia; int2; agregar em blocos de unidades; cair para "dose calibrada"</td>
+</tr>
+<tr>
+<td>Não aditividade entre unidades</td>
+<td>E3.2 com razão longe de 1</td>
+<td>Alocar por blocos; reportar como limite</td>
+</tr>
+<tr>
+<td>O teto é alto e nenhum seletor o alcança</td>
+<td>Fase 3 muito abaixo do oráculo</td>
+<td>Vira um resultado: há ganho e ele não é capturado por sinais forward-only; motiva a referência com gradiente</td>
+</tr>
+<tr>
+<td>A queda com proteção aleatória sob GPTQ é um erro de implementação</td>
+<td>E0.4 falha</td>
+<td>Corrigir antes de qualquer número de GPTQ com proteção</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>10. Sequência de trabalho</h2>
+<ol>
+<li>E0.1, E0.2, E0.4 (dias; decide o arnês).</li>
+<li>Leitura dos seis trabalhos vizinhos de 2025–2026 (em paralelo).</li>
+<li>E1.1 e o passo previsto de E1.2 (só reanálise).</li>
+<li>E2.1 e E2.2 (só reanálise).</li>
+<li>E0.3 com R realizações; passo medido de E1.2.</li>
+<li>E1.3 (int3, int2, português, código, 4B). <strong>Ponto de decisão do ramo.</strong></li>
+<li>E2.3 e E2.4.</li>
+<li>E3.1 a E3.5.</li>
+<li>Fase 4; Fase 5 se o ramo for B.</li>
+<li>Escrita na estrutura da 6.5.</li>
+</ol>
+<p>Os itens 1 a 4 não exigem quantização nova além da já feita e bastam para saber se a tese se sustenta.</p>
+<hr />
+<h2>11. Limites deste documento</h2>
+<ul>
+<li>É uma proposta. Nenhum experimento foi executado e nenhum resultado é antecipado.</li>
+<li>Parte de uma avaliação feita só a partir do PDF, sem código, logs ou planilhas.</li>
+<li>A expectativa de ramo A e a hipótese de viés de letra são conjecturas minhas.</li>
+<li>A correção de atenuação do Argumento 2 depende de uma confiabilidade que não conheço; dei três cenários.</li>
+<li>Literatura, em três níveis:</li>
+<li><strong>Busquei diretamente e vi o resumo ou a ficha:</strong> TaCQ, OWQ, Dutta et al., arquitetura do Qwen3.5.</li>
+<li><strong>Só vi o trecho que uma busca retornou:</strong> TAQ (arXiv:2511.06516), MXSens (2607.17733), arXiv:2609.26241, 2607.00908, 2611.11079, GTAQ (IJCAI 2026), 2606.19558, 2610.00694, QEFT (2410.08661), e os dois trabalhos sobre a arquitetura híbrida (2609.04098, 2607.02893). O que afirmo sobre eles vem só desses trechos.</li>
+<li><strong>De memória:</strong> Hase et al.</li>
+<li>Os trabalhos do segundo nível ainda não foram lidos na íntegra. A tabela 6.3 deve ser refeita depois dessa leitura.</li>
+<li>Os números do PDF citados aqui foram conferidos contra o texto extraído; os de "Minha conta" estão em <code>apoio/contas_proposta.json</code> e <code>apoio/contas_revisor.json</code>.</li>
+</ul></body></html>

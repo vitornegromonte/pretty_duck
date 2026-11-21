@@ -1,0 +1,170 @@
+<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'><title>00_LEIA-ME</title><style>body{font-family:Georgia,serif;max-width:900px;margin:2em auto;padding:0 1em;line-height:1.5}table{border-collapse:collapse}td,th{border:1px solid #999;padding:4px 8px;vertical-align:top}code,pre{background:#f3f3f3}pre{padding:8px;overflow-x:auto}blockquote{border-left:3px solid #999;margin-left:0;padding-left:1em;color:#333}</style></head><body><h1>LEIA-ME — pacote sobre "Causal circuit discovery for domain-aware low-bit quantization"</h1>
+<p>Este pacote reúne um diagnóstico do documento (PDF de 19 páginas) e uma proposta de evolução para transformá-lo em paper. Tudo foi feito só a partir do PDF: sem código, logs, logits ou planilhas. Nenhum experimento novo foi executado.</p>
+<h2>1. Arquivos e ordem de leitura</h2>
+<table>
+<thead>
+<tr>
+<th>Ordem</th>
+<th>Arquivo</th>
+<th>O que é</th>
+<th>Para quê</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>00_LEIA-ME</code></td>
+<td>Esta nota</td>
+<td>Orientação, lista de mudanças no texto e pedidos</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>01_proposta_evolucao_paper</code></td>
+<td>Proposta: nova pergunta, motivos, experimentos (Fases 0–5), enquadramento, estrutura do paper</td>
+<td>É o documento principal; diz o que fazer</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>02_avaliacao_critica</code></td>
+<td>Diagnóstico: o que confere, problemas graves (G1–G7) e moderados (M1–M8), insights (H1–H10), melhorias baratas (L1–L14)</td>
+<td>Diz por quê; cada item grave traz local, citação, conta, passos, texto pronto e critério de aceite</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>apoio/contas_revisor.json</code>, <code>apoio/contas_proposta.json</code></td>
+<td>Valores dos cálculos marcados "Minha conta"</td>
+<td>Conferência</td>
+</tr>
+</tbody>
+</table>
+<p>Cada documento está em <code>.md</code> e em <code>.html</code> (mesmo conteúdo).</p>
+<p>Convenções dos dois relatórios: "p. N" é a página do PDF; texto entre aspas curvas é citação literal do PDF, conferida por script; blocos "Minha conta" são cálculos do avaliador, não do documento; <code>[R]</code> é reanálise de saídas existentes, <code>[E]</code> é experimento novo, <code>[T]</code> é só texto.</p>
+<h2>2. Resumo</h2>
+<ul>
+<li>O ganho de +3,2 pontos no OAB pela proteção do circuito legal não está estabelecido, e a retratação da Seção 9 do PDF também não: as duas se apoiam em acurácia por letra com uma realização, e execuções do mesmo código diferem 8,8 pontos nessa métrica.</li>
+<li>A ideia "circuito → manter em 16 bits" já foi publicada (TaCQ, COLM 2025), e a escolha por dose corresponde ao OWQ (AAAI 2024). Nenhum dos dois é citado.</li>
+<li>Os próprios dados indicam que os circuitos achados são componentes genericamente críticos e que a sensibilidade à quantização é em grande parte compartilhada entre domínios.</li>
+<li>A proposta é mudar a pergunta: medir quanto a consciência de domínio pode render (um teto, com piso de ruído), explicar por que a localização causal não alcança esse ganho, e testar a sensibilidade medida por unidade como sinal que chega mais perto.</li>
+<li>O enquadramento gera um paper nos três desfechos possíveis do teto (documento 01, Seção 5).</li>
+</ul>
+<h2>3. O que fazer primeiro</h2>
+<p>Estes passos não exigem quantização nova e bastam para saber se a tese se sustenta.</p>
+<ol>
+<li>Avaliar os mesmos pesos quantizados salvos, e o fp16, nas duas GPUs (01: E0.1).</li>
+<li>Contar as letras previstas por condição e recalcular a acurácia sem o viés de letra (01: E0.2).</li>
+<li>Conferir que proteger zero colunas reproduz o uniforme bit a bit, em RTN e GPTQ (01: E0.4).</li>
+<li>Calcular a confiabilidade das tabelas de sensibilidade por camada e a correlação entre domínios corrigida (01: E1.1).</li>
+<li>Cruzar o circuito legal com o de siglas gerais e pôr intervalos nas suficiências e necessidades (01: E2.1, E2.2).</li>
+<li>Ler os trabalhos vizinhos de 2025–2026 listados em 01, Seção 6.3.</li>
+</ol>
+<h2>4. Mudanças no manuscrito</h2>
+<h3>Retirar</h3>
+<ul>
+<li>O título atual e a apresentação da proteção por circuito como "the current method" (Seção 2 do PDF).</li>
+<li>A frase do resumo sobre recuperar "about a third" da perda (02: G2).</li>
+<li>"±6 accuracy points" sem derivação (02: Seção 8).</li>
+<li>As suítes ainda em execução citadas na Seção 9.4 do PDF.</li>
+<li>As Seções 12 (Reproducing) e A (Code map): vão para o repositório.</li>
+<li>Os experimentos de persona do corpo principal: apêndice ou fora.</li>
+</ul>
+<h3>Corrigir</h3>
+<ul>
+<li>Legenda da Tabela 11 e a explicação por "rounding noise" (02: G1).</li>
+<li>"the only protected set with a significant gain" e "do not give this gain" (02: G3).</li>
+<li>"indistinguishable from uniform quantization" sob GPTQ (02: G4).</li>
+<li>"domain of knowledge" → "relation" (02: G5).</li>
+<li>"no law specificity" → não detectável com a margem disponível (02: M2).</li>
+<li>"almost disjoint across domains" (02: M4).</li>
+<li>"validated against the authors' code" → confere no erro por matriz e na NLL (02: M6).</li>
+<li>Referência [4] sem autores; GPTQ ausente da lista (02: G6).</li>
+<li>Posição da Tabela 9; 42,4% em 800 questões contra 43,8% em 600; redação de E12 na Tabela 13 (02: Seção 8).</li>
+</ul>
+<h3>Acrescentar</h3>
+<ul>
+<li>Seção de trabalhos relacionados (02: G6; 01: Seção 6.3).</li>
+<li>Métrica primária contínua, várias realizações e distribuição nula sobre conjuntos protegidos (01: Fase 0 e E2.4).</li>
+<li>Intervalos nas Tabelas 7, 8, 15 e 16 do PDF (01: E2.2).</li>
+<li>Figuras de dados; hoje há uma figura esquemática e 19 tabelas (01: Seção 6.6).</li>
+<li>Licença do conjunto de exames e revisão da planilha de fatos por jurista (02: M7).</li>
+</ul>
+<h3>Decidir</h3>
+<ul>
+<li>O ramo do paper, depois da Fase 1 (01: Seção 5).</li>
+<li>Venue e pacote mínimo (01: Seção 8).</li>
+</ul>
+<h2>5. O que seria útil receber de volta</h2>
+<p>Com estes itens, várias hipóteses dos relatórios podem ser confirmadas ou descartadas por reanálise, sem experimento novo.</p>
+<ol>
+<li>Logits ou respostas por questão das condições das Tabelas 9, 11 e 12 do PDF.</li>
+<li>Da execução na 3080 Ti: a NLL em texto neutro; tamanho de lote, padding e dtype usados na avaliação em cada máquina; e se o fp16 dá 43,8% nas duas.</li>
+<li>Como os blocos de 64 colunas são formados quando as colunas protegidas são espalhadas (ativação, <code>outlier_all</code>): os blocos são refeitos sobre as colunas restantes ou mantidos?</li>
+<li>No GPTQ com proteção: qual modo foi usado nos números reportados (colunas congeladas ou "error sinks"), e se proteger zero colunas reproduz o uniforme.</li>
+<li>Os três valores dos sorteios aleatórios da Tabela 9 (o PDF traz só os extremos).</li>
+<li>As planilhas de fatos (jurídicos e siglas gerais) e os <code>probe.json</code> dos dois circuitos.</li>
+<li>As tabelas ΔL por linha do 0.8B, não só as médias.</li>
+<li>Se a camada de saída, amarrada ao embedding, entra na quantização.</li>
+<li>Venue e prazo pretendidos.</li>
+</ol>
+<h2>6. Correspondência entre os dois documentos</h2>
+<table>
+<thead>
+<tr>
+<th>Melhoria em 02 (Seção 6)</th>
+<th>Experimento em 01 (Seção 4)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>L1 mesmos pesos nas duas GPUs</td>
+<td>E0.1</td>
+</tr>
+<tr>
+<td>L2 letras previstas e viés de letra; L13 permutação de opções</td>
+<td>E0.2</td>
+</tr>
+<tr>
+<td>L3 KL, NLL e flips; L8 mais questões; L12 várias realizações</td>
+<td>E0.3</td>
+</tr>
+<tr>
+<td>L9 teste "zero colunas protegidas = uniforme"</td>
+<td>E0.4</td>
+</tr>
+<tr>
+<td>L4 distribuição nula com 30 conjuntos</td>
+<td>E2.4</td>
+</tr>
+<tr>
+<td>L5 circuito legal × siglas gerais</td>
+<td>E2.1</td>
+</tr>
+<tr>
+<td>L6 intervalos por bootstrap</td>
+<td>E2.2</td>
+</tr>
+<tr>
+<td>L7 D relativo</td>
+<td>relacionado à "dose calibrada" de E3.3</td>
+</tr>
+<tr>
+<td>L10 trabalhos relacionados</td>
+<td>Seção 6.3</td>
+</tr>
+<tr>
+<td>L11 controle de dose no patching de persona</td>
+<td>fora do paper proposto (persona vai para apêndice)</td>
+</tr>
+<tr>
+<td>L14 segundo modelo</td>
+<td>Fase 4</td>
+</tr>
+</tbody>
+</table>
+<h2>7. O que foi e o que não foi verificado</h2>
+<ul>
+<li><strong>Conferido:</strong> as 35 citações literais de 02 e as 5 de 01 contra o texto extraído do PDF; a aritmética das tabelas do PDF que o texto permite refazer (não foi achado erro de conta); a arquitetura pública do Qwen3.5 contra as contagens de unidades.</li>
+<li><strong>Aproximações:</strong> as contagens de respostas trocadas em 02 vêm da largura dos intervalos; a dispersão dos controles usa os extremos dos sorteios aleatórios.</li>
+<li><strong>Hipóteses não verificadas:</strong> viés de letra; diferença de avaliação entre GPUs; reagrupamento dos blocos de 64; expansão de siglas como tarefa em parte ortográfica; a expectativa sobre o desfecho do teto.</li>
+<li><strong>Literatura:</strong> TaCQ, OWQ, Dutta et al. e Ye et al. foram buscados diretamente. Os demais trabalhos de 2025–2026 foram vistos só por trechos de busca, e alguns são citados de memória; os níveis estão discriminados no fim de cada relatório. A tabela de posicionamento (01, Seção 6.3) deve ser refeita depois da leitura integral. Não foi feita revisão sistemática.</li>
+<li><strong>Nenhum experimento da proposta foi executado.</strong> Os resumos-modelo de 01 usam marcadores no lugar de números.</li>
+</ul></body></html>

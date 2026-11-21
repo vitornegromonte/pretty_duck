@@ -68,9 +68,25 @@ def test_padding_positions_are_excluded(tiny_model, tokenizer):
         got = c.layers()
     for name in got:
         assert got[name]["count"] == int(enc["attention_mask"].sum())  # pads not counted
-        assert torch.allclose(got[name]["A"], short[name]["A"], atol=1e-10)
-        assert torch.allclose(got[name]["V"], short[name]["V"], atol=1e-10)
-        assert torch.allclose(got[name]["M"], short[name]["M"], atol=1e-10)
+        # The activations are float32, and a padded batch has a different shape, so another BLAS path can
+        # change them by about 1e-8 (seen on CI). The statistics are accumulated in float64.
+        # A leak of pad positions changes them by about 1 (see the next test).
+        for key in ("A", "V", "M"):
+            assert torch.allclose(got[name][key], short[name][key], rtol=1e-4, atol=1e-6), key
+
+
+def test_pad_leak_would_change_the_statistics_far_beyond_the_tolerance(tiny_model, tokenizer):
+    """Negative control for the test above: a mask that counts the pads must be detected."""
+    line = "w1 w2 w3"
+    short = collect_domain(tiny_model, tokenizer, [line], max_len=16, n_samples=1)
+    enc = tokenizer([line], return_tensors="pt", padding="max_length", max_length=16)
+    with ActivationCollector(tiny_model) as c:
+        c.observe(torch.ones_like(enc["attention_mask"]))  # wrong on purpose: pads count as real tokens
+        with torch.no_grad():
+            tiny_model(input_ids=enc["input_ids"], attention_mask=enc["attention_mask"])
+        leaked = c.layers()
+    worst = max(float((leaked[n]["V"] - short[n]["V"]).abs().max()) for n in leaked)
+    assert worst > 1e-2
 
 
 def test_tied_lm_head_is_not_collected(tiny_model, tokenizer):

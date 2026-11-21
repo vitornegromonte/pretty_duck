@@ -11,11 +11,21 @@ You are the orchestrator. You dispatch subagents, check their files, and stop at
 
 Cost warning: this pipeline starts many subagents. Tell the user the plan before stage 1. Do not use it for a question that you can answer by reading one file.
 
+## Resume
+
+The pipeline is long and the context fills up. After `/clear`, or in a new session, read `docs/research/<slug>/INDEX.md` and continue from the first stage that is not `done`. Never restart a stage that is `done` unless the user asks. Record in `INDEX.md` the stage, its status, the date, and the gate that was passed.
+
 ## Setup
 
 1. Make a slug (short, lowercase, hyphens). Create `docs/research/<slug>/`.
 2. Write `00_question.md` with: the question, the scope, the constraints (models, data, GPU time), the date window, and what the user expects. Create `INDEX.md` with one row per stage and its status.
 3. Read `.claude/rules/research.md` and keep to it.
+
+## Preflight (before stage 1)
+
+1. Check that the subagent types exist (`/agents`). If one is missing, stop and tell the user to restart the session.
+2. Check that the web tools work: run one search and open one page. `WebFetch` can be missing in some sessions. If it is missing, tell the user. The retriever and the auditor then need the texts downloaded by you.
+3. Tell the user the plan and the expected cost: stages 2, 3, and 4 use the most tokens. Models: the scout and the retriever use `sonnet`; the others use the session model. Check `/usage` after stage 3.
 
 ## Stages
 
@@ -36,6 +46,7 @@ Notes for each stage:
 
 - **Stage 2.** If the topic is broad, start up to 3 retrievers in parallel, one per group of sub-questions. Give each its own output name (`02_sources_<group>.csv`). Merge them yourself and remove duplicates by arXiv id or DOI.
 - **Stage 3.** Build the claim list from the retriever notes and from the project documents (`docs/paper/method.tex`, the ADR). Start one auditor per group of papers when the list is long. Give each claim and its source id.
+- **Stage 3, high-risk claims.** For a claim that the strategy will depend on, start **two** independent auditors with the same input and compare. A disagreement goes to the human.
 - **Stage 4.** Pass the project's own claim. Tell the reviewer to try to find prior art.
 - **Stage 5b.** Run it on every strategy. If the verdict is `REVISE`, send the issues back to the strategist (new file `05_strategy_v2.md`; do not edit the old one). Allow at most 2 rounds.
 - **Stage 6.** Never let the engineer grade the work. Start the evaluator as a new subagent with fresh context.

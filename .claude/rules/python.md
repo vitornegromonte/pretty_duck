@@ -1,9 +1,7 @@
 ---
 paths:
-  - "compress/**/*.py"
   - "src/**/*.py"
   - "scripts/**/*.py"
-  - "experiments/**/*.py"
   - "tests/**/*.py"
 ---
 
@@ -18,9 +16,9 @@ Fix it when you change it for another reason. The rules below are what the linte
 - Prefer functions and small dataclasses. Use a class when an object must hold or restore state, for example a context
   manager that changes model weights and puts them back (`MixedQuant`, `GPTQQuant`). Do not build class hierarchies for experiments.
 - Make dependencies explicit: pass them as arguments. Isolate side effects.
-- Put logic in `compress/`. Keep `scripts/` thin: parse arguments, build the experiment, run it, save the result.
+- Put logic in `src/compress/`. Keep `scripts/` thin: parse arguments, build the experiment, run it, save the result.
   Write results to files, not to stdout. Scripts may write progress to stderr with one `log` helper.
-- Use `logging`, not `print()`, in library code under `compress/`.
+- Use `logging`, not `print()`, in library code under `src/compress/`.
 - Use a dataclass or a typed structure for a data contract such as a result row.
 
 ## Interfaces

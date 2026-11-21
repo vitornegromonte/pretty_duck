@@ -3,9 +3,9 @@
 import pytest
 import torch
 
-from compress.gptq import GPTQQuant
-from compress.protect import FormatPlan, MixedQuant
-from compress.quant_probe import QuantizeColumns, fake_quant_group, fake_quant_group_keep_blocks
+from compress.quant.fake import QuantizeColumns, fake_quant_group, fake_quant_group_keep_blocks
+from compress.quant.gptq import GPTQQuant
+from compress.quant.protect import FormatPlan, MixedQuant
 from tests.conftest import CALIB_LINES
 
 

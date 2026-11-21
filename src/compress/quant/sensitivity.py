@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import torch
 
-from .evaluate import line_nll
-from .quant import quantize_weight
+from compress.evaluation.text import line_nll
+from compress.quant.formats import quantize_weight
 
 
 class QuantizeLayers:

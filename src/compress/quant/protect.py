@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import torch
 
-from .quant_probe import fake_quant, fake_quant_group, fake_quant_group_keep_blocks
+from compress.quant.fake import fake_quant, fake_quant_group, fake_quant_group_keep_blocks
 
 
 class MixedQuant:
@@ -87,7 +87,7 @@ class FormatPlan:
 
     @torch.no_grad()
     def __enter__(self) -> "FormatPlan":
-        from .quant import quantize_weight
+        from compress.quant.formats import quantize_weight
 
         modules = dict(self.model.named_modules())
         try:
@@ -124,7 +124,7 @@ class FormatPlan:
 def plan_nbytes(shapes: dict[str, tuple[int, int]], formats: dict[str, str] | None = None,
                 protect: dict[str, torch.Tensor] | None = None, default: str = "nf4") -> int:
     """Exact payload bytes of a :class:`FormatPlan`: protected columns cost fp16, the rest their format."""
-    from .quant import storage_nbytes
+    from compress.quant.formats import storage_nbytes
 
     total = 0
     for name, (out, inc) in shapes.items():

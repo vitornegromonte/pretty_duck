@@ -1,11 +1,7 @@
-"""Multiple-choice evaluation, option scoring by answer log-probability.
+"""Multiple-choice scoring.
 
-Each question offers options A and B; the model picks the option with the
-higher log-probability of the answer tokens (prompt tokens excluded from the
-loss, matching ``contra.phase3_multiple_choice``).  ``negate`` flips the
-correct label, which is how the anti-domain persona ("reject"/"negate") was
-scored in the original code.  The prompt uses the tokenizer's chat template
-when it has one, so the evaluator works across model families.
+Option scoring by answer log-probability, and letter scoring of MMLU-style rows. The prompt uses the
+tokenizer's chat template when it has one, so the scorer works across model families.
 """
 
 from __future__ import annotations
@@ -15,7 +11,7 @@ import time
 
 import torch
 
-from .mmlu import LETTERS
+from compress.data.mmlu import LETTERS
 
 PROMPT_STYLES = ("auto", "chat", "plain", "llama2")
 
@@ -208,44 +204,18 @@ def evaluate_mmlu_rows(
         "predictions": predictions,
     }
 
-
-@torch.no_grad()
-def line_nll(
-    model: torch.nn.Module, tokenizer, lines: list[str], *, batch_size: int = 8, max_len: int = 128
-) -> list[float]:
-    """Mean next-token NLL per line, over valid (non-padding) tokens only."""
-    model.eval()
-    device = next(model.parameters()).device
-    side, tokenizer.padding_side = tokenizer.padding_side, "right"  # positions stay 0..n-1
-    try:
-        out: list[float] = []
-        for i in range(0, len(lines), batch_size):
-            batch = tokenizer(lines[i:i + batch_size], return_tensors="pt", padding=True,
-                              truncation=True, max_length=max_len)
-            ids, mask = batch["input_ids"].to(device), batch["attention_mask"].to(device)
-            logits = model(input_ids=ids, attention_mask=mask).logits[:, :-1].float()
-            nll = torch.nn.functional.cross_entropy(
-                logits.transpose(1, 2), ids[:, 1:], reduction="none"
-            )
-            valid = mask[:, 1:].float()
-            out.extend(((nll * valid).sum(1) / valid.sum(1).clamp_min(1)).tolist())
-    finally:
-        tokenizer.padding_side = side
-    return out
+def score_rows(model, tokenizer, rows: list[dict], sys_prompt: str) -> dict:
+    """Score MMLU-style rows by answer letter: accuracy (%), mean NLL of the correct letter, per-question results."""
+    result = evaluate_mmlu_rows(model, tokenizer, rows, sys_prompt=sys_prompt, prompt_style="plain")
+    predictions = result["predictions"]
+    return {"acc": result["accuracy"], "nll": result["nll_per_token"],
+            "correct": [int(p["predicted"] == p["expected"]) for p in predictions],
+            "nll_q": [p["nll"] for p in predictions]}
 
 
-@torch.no_grad()
-def token_nll(model: torch.nn.Module, tokenizer, lines: list[str], *, max_len: int = 256, batch_size: int = 8) -> float:
-    """Mean next-token NLL over all valid tokens of ``lines`` (token-weighted, unlike ``line_nll``)."""
-    model.eval()
-    device = next(model.parameters()).device
-    total, count = 0.0, 0
-    for i in range(0, len(lines), batch_size):
-        batch = tokenizer(lines[i:i + batch_size], return_tensors="pt", padding=True, truncation=True,
-                          max_length=max_len).to(device)
-        logits = model(**batch).logits[:, :-1].float()
-        nll = torch.nn.functional.cross_entropy(logits.transpose(1, 2), batch["input_ids"][:, 1:], reduction="none")
-        valid = batch["attention_mask"][:, 1:].bool()
-        total += float(nll[valid].sum())
-        count += int(valid.sum())
-    return total / count
+def accuracy_by_area(correct: list[int], rows: list[dict]) -> dict[str, float]:
+    """Accuracy (%) of each ``area`` label among ``rows`` (``correct`` is aligned with ``rows``)."""
+    totals: dict[str, list[int]] = {}
+    for flag, row in zip(correct, rows):
+        totals.setdefault(row["area"], []).append(flag)
+    return {area: 100 * sum(flags) / len(flags) for area, flags in totals.items()}

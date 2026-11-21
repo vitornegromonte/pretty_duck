@@ -4,15 +4,15 @@ import math
 
 import pytest
 
-from compress.evaluate import (
+from compress.evaluation.mcq import (
     batch_option_nll,
     build_prompt,
     evaluate_mmlu_rows,
     format_mmlu_question,
-    line_nll,
     option_logprob,
     option_nll,
 )
+from compress.evaluation.text import line_nll
 
 
 def _n_tokens(tokenizer, text: str) -> int:

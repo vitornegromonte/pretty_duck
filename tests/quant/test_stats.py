@@ -3,13 +3,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from compress.stats import (
-    ActivationCollector,
-    collect_domain,
-    load_stats,
-    save_stats,
-    tied_weight_ptrs,
-)
+from compress.quant.stats import ActivationCollector, collect_domain, load_stats, save_stats, tied_weight_ptrs
 from tests.conftest import CALIB_LINES
 
 

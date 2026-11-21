@@ -5,7 +5,7 @@ import tarfile
 
 import pytest
 
-from compress.mmlu import load_mmlu
+from compress.data.mmlu import load_mmlu
 
 ROWS = [
     ["w1 w2?", "w3", "w4", "w5", "w1", "B"],

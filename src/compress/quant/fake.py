@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import torch
 
-from .quant import _quantize_int
+from compress.quant.formats import _quantize_int
 
 
 def fake_quant(W: torch.Tensor, bits: int) -> torch.Tensor:

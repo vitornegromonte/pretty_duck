@@ -591,79 +591,35 @@ equivalent quantizers varies by about $\pm6$ points (the same GPTQ gave 49.5\% a
 \end{itemize}
 
 \section{Reproducing}
-All commands run from the repository root; the scripts need \code{PYTHONPATH=.}. Calibration and evaluation text:
+\label{sec:repro}
+The experiments E1--E23 were run with an earlier code base (a diagonal-error bit-allocation planner, packed storage, persona
+experiments, and Brazilian-law benchmarks). It was removed from the main branch because the paper studies circuits in general.
+To reproduce a result of this document, check out the tag \code{v0-pre-refactor} and follow the commands in the \code{README.md} and
+\code{docs/paper/method.tex} of that tag. The result files keep their old keys (for example \code{oab\_acc}, \code{law\_logp}).
+
+The current code base reproduces the circuit and quantization experiments on general domains. From the repository root:
 \begin{small}\begin{verbatim}
+make test                                              # offline CPU tests
+export PYTHONPATH=src
 python scripts/make_mmlu_calib.py --out-dir outputs/calib2 \
     math=college_mathematics,... law=professional_law,...
 python scripts/make_mmlu_calib.py --split test --out-dir outputs/eval \
     math=... law=...
-python scripts/make_persona_calib.py data/persona/wealth_train.csv \
-    --out-dir outputs/persona_calib
-\end{verbatim}\end{small}
-Statistics, errors, plans and mean ablation:
-\begin{small}\begin{verbatim}
-python -m compress collect_stats --model-path M \
-    --calib math=... --calib law=... --out stats.pt
-python -m compress estimate_quant_error --model-path M --stats stats.pt \
-    --row-group 64 --out errors.json
-python -m compress allocate_bits --errors errors.json --target math \
-    --signal tarc --lam 10 --size-budget N --out plan.json
-python -m compress causal_probe --model-path M --stats stats.pt \
-    --target math_a --others law_a --k-frac 0.01 \
-    --eval-target math=outputs/eval/math.txt \
-    --eval-other law=outputs/eval/law.txt --out probe.json
-\end{verbatim}\end{small}
-Persona experiments (\code{T} is \code{data/persona/wealth\_test\_infer.csv}):
-\begin{small}\begin{verbatim}
-python scripts/persona_gate.py --model-path Qwen/Qwen3.5-0.8B \
-    --test T --out gate.json
-python scripts/persona_patch.py --model-path Qwen/Qwen3.5-0.8B \
-    --stats stats_persona.pt --test T --k-frac 0.05 --per-question \
-    --out patch.json                 # add --reverse for necessity
-python scripts/persona_quant.py --model-path Qwen/Qwen3.5-0.8B \
-    --stats stats_persona.pt --test T --out quant.json
-\end{verbatim}\end{small}
-Brazilian-law data, circuits and protection (Qwen3.5-4B; \code{M} is the model path):
-\begin{small}\begin{verbatim}
-python scripts/oab_prepare.py outputs/data/oab_exams/train.parquet \
-    outputs/data/oab_exams/oab_exams.jsonl
-python scripts/br_law_knowledge.py --model-path M \
-    --oab outputs/data/oab_exams/oab_exams.jsonl \
-    --facts data/legal_facts/fatos_direito_br_rascunho.csv \
-    --few-shot --out knowledge.json
 python scripts/circuit_probe.py --model-path M \
-    --domains capitals,elements,french,direito_siglas \
-    --facts-csv data/legal_facts/fatos_direito_br_rascunho.csv \
-    --csv-domain direito_siglas=siglas --no-quant \
+    --domains capitals,elements,french --no-quant \
     --ks 8,16,32,64,128 --out probe.json
 python scripts/entanglement.py --model-path M --probe probe.json \
     --ks 4,8,16,32,64 --core-k 32 --excl-k 64 --out entanglement.json
-python scripts/protect_law.py --model-path M --probe probe.json \
-    --stats stats.pt --oab outputs/data/oab_exams/oab_exams.jsonl \
-    --out protect.json
-python scripts/protect_law.py ... --bits 4 \
-    --controls capitals,elements,french --out controls.json
-\end{verbatim}\end{small}
-The non-legal control uses \code{data/controls/fatos\_siglas\_gerais\_ptbr.csv} with \code{--csv-domain siglas\_gerais=siglas\_gerais} and is merged into the probe file before \code{protect\_law.py --controls siglas\_gerais}.
-
-Specificity, real baselines and quantizer suites (Section~\ref{sec:stronger}); \code{third\_party/gptq\_ref} holds the authors' \code{gptq.py} and \code{quant.py} and is not versioned:
-\begin{small}\begin{verbatim}
-python scripts/protect_law.py --model-path M --probe probe.json \
-    --stats stats.pt --benchmark mmmlu \
-    --mmmlu-csv outputs/data/mmmlu/mmlu_PT-BR.csv --bits 4 \
-    --ks 32,128 --n-random 6 --with-standard --out mmmlu.json
-python scripts/baselines.py --model-path M --probe probe.json \
-    --stats stats.pt --oab outputs/data/oab_exams/oab_exams.jsonl \
-    --calib-dir outputs/calib2 --neutral outputs/eval/hum.txt \
-    --out baselines.json            # GPTQ/RTN protection
-python scripts/baselines.py ... --only-uniform \
-    --roundings gptq_ref,gptq,rtn   # cross-check with the authors' GPTQ
+python scripts/neuron_scan.py --help
+python scripts/sensitivity.py --model-path M --stats stats.pt \
+    --eval math=outputs/eval/math.txt --out sensitivity.json
 python scripts/quant_suite.py --model-path M --probe probe.json \
-    --stats stats.pt --oab outputs/data/oab_exams/oab_exams.jsonl \
-    --mmmlu-csv outputs/data/mmmlu/mmlu_PT-BR.csv \
-    --calib-dir outputs/calib2 --neutral outputs/eval/hum.txt \
-    --suites grid,cal,protect,soft,mixed,lowrank --out suite.json
+    --stats stats.pt --calib-dir outputs/calib2 \
+    --neutral outputs/eval/hum.txt --domain capitals \
+    --target-subjects geography --control-subjects high_school_mathematics \
+    --suites grid,protect --out suite.json
 \end{verbatim}\end{small}
+Every result file stores its configuration and a provenance record (commit, software, GPUs, dtype).
 
 \clearpage
 \appendix
@@ -671,31 +627,25 @@ python scripts/quant_suite.py --model-path M --probe probe.json \
 \begin{center}\small
 \begin{tabular}{lp{7.4cm}}
 \toprule
-file & role\\
+module (\code{src/compress/}) & role\\
 \midrule
-\code{compress/stats.py} & per-domain moments $A$, $V$, $M$\\
-\code{compress/quant.py} & formats, exact bytes, $D$, importance, row-group units\\
-\code{compress/allocate.py} & estimation, greedy plan, contrast signals (including TARC)\\
-\code{compress/serialize.py} & packed storage, manifest, grouped layers\\
-\code{compress/patching.py} & channel sets, ablation hooks, dose-matched controls\\
-\code{compress/pair\_patching.py} & minimal-pair patching, restoration, necessity\\
-\code{compress/quant\_probe.py} & column-wise fake quantization and retention\\
-\code{scripts/persona\_*.py} & persona gate, patching and quantization drivers\\
-\code{compress/facts.py}, \code{circuit.py} & recall domains; units, scan, circuits, dose matching\\
-\code{compress/sensitivity.py} & measured per-layer $\Delta L$ and multi-layer plans\\
-\code{compress/protect.py} & mixed-format fake quantization, protected columns\\
-\code{scripts/sensitivity.py}, \code{circuit\_probe.py} & measured table; circuit scan, quantization, additivity\\
-\code{scripts/entanglement.py}, \code{protect.py} & core and periphery; protection in whole-model quantization\\
-\code{scripts/alloc\_e2e.py} & allocation comparison at equal bytes\\
-\code{scripts/neuron\_scan.py} & single-neuron scan and neuron-level entanglement\\
-\code{scripts/protect\_law.py} & protected group-wise quantization on OAB, with controls\\
-\code{compress/oab.py}, \code{scripts/br\_law\_knowledge.py} & OAB and MMMLU loaders, fact sheets, known-fact measurement\\
-\code{compress/gptq.py} & sequential GPTQ: clipping, asymmetric grid, act-order, per-layer bits, calibration mixture, column weights, low rank, protected columns\\
-\code{scripts/baselines.py} & RTN/GPTQ with circuit, dose, AWQ-like, outlier and random protection; cross-check with the authors' GPTQ\\
-\code{scripts/quant\_suite.py} & grid, calibration, protection, soft-weight, allocation and low-rank suites with resume\\
+\code{quant/formats.py} & formats, exact storage sizes\\
+\code{quant/fake.py} & fake quantization of matrices, groups, and chosen columns\\
+\code{quant/gptq.py}, \code{gptq\_reference.py} & GPTQ with protected columns, clipping, low rank; the authors' GPTQ as a cross-check\\
+\code{quant/protect.py} & whole-model quantization with columns kept at full precision, exact sizes, outlier columns\\
+\code{quant/stats.py} & per-channel activation statistics\\
+\code{quant/sensitivity.py} & measured damage of quantizing one layer at a time\\
+\code{interp/units.py}, \code{minimal\_pairs.py} & units (heads, neuron groups); entity-swap minimal pairs\\
+\code{interp/hooks.py}, \code{scan.py} & patching hooks; sufficiency, necessity, and circuit ranking\\
+\code{interp/damage.py} & quantization damage of a unit set, with dose-matched controls\\
+\code{evaluation/mcq.py}, \code{text.py} & multiple-choice scoring; text perplexity\\
+\code{data/mmlu.py}, \code{facts.py}, \code{calibration.py} & MMLU questions; fact domains; calibration text\\
+\code{experiments/context.py}, \code{suite.py} & experiment setup; the suite of quantization conditions\\
+\code{models.py}, \code{provenance.py} & model loading; code and hardware record\\
 \bottomrule
 \end{tabular}
 \end{center}
+The experiments E1--E23 used modules that no longer exist (planner, persona probes, Brazilian-law data); see Section~\ref{sec:repro}.
 
 
 \section{Measured sensitivity, circuits and end-to-end allocation}

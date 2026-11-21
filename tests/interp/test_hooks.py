@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from compress.pair_patching import SuffixCapture, SuffixPatch, layer_of, ratio_ci
+from compress.interp.hooks import SuffixCapture, SuffixPatch, layer_of, ratio_ci
 
 
 def test_layer_of_reads_the_decoder_layer_index():

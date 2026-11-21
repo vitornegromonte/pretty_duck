@@ -1,7 +1,7 @@
 import torch
 
-from compress.gptq import GPTQQuant, gptq_quantize
-from compress.quant_probe import fake_quant_group
+from compress.quant.fake import fake_quant_group
+from compress.quant.gptq import GPTQQuant, gptq_quantize
 from tests.conftest import CALIB_LINES
 
 
@@ -57,7 +57,7 @@ def test_model_gptq_changes_weights_and_restores_them(tiny_model, tokenizer):
 
 
 def test_grid_options_keep_the_grid_size_and_clipping_never_hurts_rounding_error():
-    from compress.gptq import _fit_grid
+    from compress.quant.gptq import _fit_grid
     W, H, X = _problem(3)
     w = W[:, :64]
     for asym in (False, True):
@@ -72,7 +72,7 @@ def test_grid_options_keep_the_grid_size_and_clipping_never_hurts_rounding_error
 
 
 def test_lowrank_correction_is_optimal_monotone_and_exact_at_full_rank():
-    from compress.gptq import lowrank_correction
+    from compress.quant.gptq import lowrank_correction
     W, H, X = _problem(4, out_f=16, in_f=64)
     E = W - fake_quant_group(W, 2, 64)
     errs = [_out_err(E, lowrank_correction(E, H, r), X) for r in (0, 4, 16)]

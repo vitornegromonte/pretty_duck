@@ -1,4 +1,4 @@
-"""Run a suite of quantization conditions on one model (see ``compress/suite.py`` for the conditions).
+"""Run a suite of quantization conditions on one model (see ``compress/experiments/suite.py`` for the conditions).
 
 Evaluation uses two groups of MMLU subjects: ``target`` and ``control``. The protected circuit comes from a
 ``circuit_probe.py`` result file for ``--domain``. Results are written after every condition, and a restart skips the
@@ -17,8 +17,8 @@ import argparse
 import logging
 import sys
 
-from compress.experiment import load_context
-from compress.suite import SUITES, SYS_PROMPT, QuantSuite, SuiteConfig
+from compress.experiments.context import load_context
+from compress.experiments.suite import SUITES, SYS_PROMPT, QuantSuite, SuiteConfig
 
 
 def parse_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, SuiteConfig]:

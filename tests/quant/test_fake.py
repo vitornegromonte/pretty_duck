@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from compress.quant_probe import QuantizeColumns, fake_quant
+from compress.quant.fake import QuantizeColumns, fake_quant
 
 Q0 = "model.layers.0.self_attn.q_proj"
 ROWS = [

@@ -8,11 +8,14 @@ import tarfile
 import pytest
 import torch
 
-from compress.calibration import mixed_domain_batches, read_lines, text_batches
-from compress.circuit import KnowledgeProbe, build_facts, enumerate_units, make_pairs, split_facts, unit_sets
-from compress.experiment import CircuitContext, accuracy_by_area
-from compress.mmlu import load_mmlu_groups, row_to_text
-from compress.suite import QuantSuite, SuiteConfig, build_conditions
+from compress.data.calibration import mixed_domain_batches, read_lines, text_batches
+from compress.data.mmlu import load_mmlu_groups, row_to_text
+from compress.evaluation.mcq import accuracy_by_area
+from compress.experiments.context import CircuitContext
+from compress.experiments.suite import QuantSuite, SuiteConfig, build_conditions
+from compress.interp.damage import KnowledgeProbe
+from compress.interp.minimal_pairs import build_facts, make_pairs, split_facts
+from compress.interp.units import enumerate_units, unit_sets
 from tests.conftest import CALIB_LINES
 
 

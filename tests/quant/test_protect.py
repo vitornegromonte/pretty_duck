@@ -1,8 +1,8 @@
 import pytest
 import torch
 
-from compress.protect import MixedQuant
-from compress.quant_probe import fake_quant
+from compress.quant.fake import fake_quant
+from compress.quant.protect import MixedQuant
 
 Q0 = "model.layers.0.self_attn.q_proj"
 U1 = "model.layers.1.mlp.up_proj"
@@ -51,8 +51,8 @@ def test_protecting_everything_changes_nothing(tiny_model):
 
 
 def test_format_plan_applies_a_format_per_layer_and_protects_columns(tiny_model):
-    from compress.protect import FormatPlan, plan_nbytes
-    from compress.quant import quantize_weight, storage_nbytes
+    from compress.quant.formats import quantize_weight, storage_nbytes
+    from compress.quant.protect import FormatPlan, plan_nbytes
     before_q, before_u = _w(tiny_model, Q0).clone(), _w(tiny_model, U1).clone()
     keep = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7])
     with FormatPlan(tiny_model, [Q0, U1], {U1: "int8"}, {Q0: keep}):
@@ -72,7 +72,7 @@ def test_format_plan_applies_a_format_per_layer_and_protects_columns(tiny_model)
 
 
 def test_group_quantization_is_finer_than_per_row_and_handles_ragged_widths():
-    from compress.quant_probe import fake_quant_group
+    from compress.quant.fake import fake_quant_group
     torch.manual_seed(0)
     W = torch.randn(8, 150) * torch.tensor([1.0] * 100 + [5.0] * 50)  # outlier columns at the end
     err = lambda q: float((W - q).square().mean())
@@ -87,7 +87,7 @@ def test_group_quantization_is_finer_than_per_row_and_handles_ragged_widths():
 
 
 def test_mixed_quant_with_groups_keeps_protected_columns_and_restores(tiny_model):
-    from compress.quant_probe import fake_quant_group
+    from compress.quant.fake import fake_quant_group
     before = _w(tiny_model, U1).clone()  # 32 x 16... in_features = 16
     keep = torch.tensor([0, 1, 2, 3])
     rest = [j for j in range(before.shape[1]) if j not in keep.tolist()]
@@ -99,7 +99,7 @@ def test_mixed_quant_with_groups_keeps_protected_columns_and_restores(tiny_model
 
 
 def test_outlier_columns_fill_the_weight_budget_by_dose_density(tiny_model):
-    from compress.protect import outlier_columns
+    from compress.quant.protect import outlier_columns
     names = [n for n, m in tiny_model.named_modules() if isinstance(m, torch.nn.Linear) and ".layers." in n]
     modules = dict(tiny_model.named_modules())
     V = {n: torch.rand(modules[n].in_features, dtype=torch.double) + 0.1 for n in names}

@@ -26,10 +26,11 @@ import statistics as st
 import sys
 from pathlib import Path
 
-from compress.circuit import (Scanner, Unit, build_facts, core_units, enumerate_units, excluding,
-                              make_pairs, match_random, split_facts, top_units, unit_sets)
+from compress.data.facts import FACTS, TEMPLATES
+from compress.interp.minimal_pairs import build_facts, make_pairs, split_facts
+from compress.interp.scan import Scanner, core_units, excluding, top_units
+from compress.interp.units import Unit, enumerate_units, match_random, unit_sets
 from compress.models import load_model
-from compress.facts import FACTS, TEMPLATES
 
 log = lambda m: print(m, file=sys.stderr, flush=True)
 

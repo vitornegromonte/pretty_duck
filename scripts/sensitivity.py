@@ -19,9 +19,9 @@ import random
 import sys
 from pathlib import Path
 
-from compress import stats as stats_mod
 from compress.models import load_model
-from compress.sensitivity import measure_plans, measure_sensitivity
+from compress.quant import stats as stats_mod
+from compress.quant.sensitivity import measure_plans, measure_sensitivity
 
 
 def parse_pairs(values: list[str], what: str) -> dict[str, str]:

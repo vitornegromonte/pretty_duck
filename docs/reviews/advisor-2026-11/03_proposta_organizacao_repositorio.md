@@ -204,3 +204,16 @@ no scout e no retriever, protocolo de retomada e auditoria dupla na skill `/rese
 
 Pendente: tabelas geradas a partir dos JSON com teste de consistência entre ADR, README e paper; etapa 4 (`src/`);
 a Fase 0 do plano da revisão (logits por questão, KL, várias realizações); os 172 avisos do `ruff`; testes dos scripts.
+
+## 9. Refatoração do código (2026-11-20)
+
+Decisões do usuário: remover o legado (planejador por erro diagonal, persona) com tag, e remover o direito brasileiro do código.
+Feito: tag `v0-pre-refactor`; remoção de `allocate`, `contrast`, `serialize`, `cli`, `patching`, dos scripts de persona e de
+`alloc_e2e`, `protect`, `check_results`, e dos dados `persona`, `legal_facts` e `controls`; o código do direito (`oab`, `protect_law`,
+`br_law_knowledge`, `oab_prepare`) saiu; `baselines.py`, `quant_suite.py` e `protect_law.py` viraram `experiments/suite.py` (lista
+de condições pura mais executor) e um `scripts/quant_suite.py` fino; pacote movido para `src/compress/` e dividido em `quant`,
+`interp`, `evaluation`, `data`, `experiments`; `circuit.py` (407 linhas) dividido em `units`, `minimal_pairs`, `scan`, `damage`;
+testes em pastas que espelham o pacote; `tests/experiments/test_suite.py` roda todas as suítes no modelo pequeno.
+Tamanho: `compress/` de 4.091 para 2.714 linhas, maior módulo 330 linhas; testes de 171 para 99 (os removidos eram do código legado).
+Não verificado: o `QuantSuite` em modelo real na GPU; a suíte `reference` (precisa de `third_party/gptq_ref`); o CI após a mudança.
+Pendente: o `rsync` para a maidai (apagar antes a pasta antiga `compress/` de lá); logits por questão e KL (Fase 0); testes dos demais scripts.

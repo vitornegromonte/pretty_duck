@@ -2,7 +2,7 @@
 import pytest
 import torch
 
-from compress.quant import (
+from compress.quant.formats import (
     NF4_BLOCKSIZE,
     NF4_CODEBOOK,
     PORTABLE_FORMATS,

@@ -8,11 +8,12 @@ from pathlib import Path
 
 import torch
 
-from . import stats as stats_mod
-from .circuit import (KnowledgeProbe, Unit, build_facts, enumerate_units, make_pairs, split_facts, unit_sets)
-from .evaluate import evaluate_mmlu_rows
-from .facts import FACTS, TEMPLATES
-from .models import load_model
+from compress.data.facts import FACTS, TEMPLATES
+from compress.interp.damage import KnowledgeProbe
+from compress.interp.minimal_pairs import build_facts, make_pairs, split_facts
+from compress.interp.units import Unit, enumerate_units, unit_sets
+from compress.models import load_model
+from compress.quant import stats as stats_mod
 
 
 @dataclass
@@ -68,20 +69,3 @@ def load_context(model_path: str, probe_path: str | Path, stats_path: str | Path
     model, tokenizer = load_model(model_path)
     probe = json.loads(Path(probe_path).read_text())
     return build_context(model, tokenizer, probe, stats_path, domain)
-
-
-def score_rows(model, tokenizer, rows: list[dict], sys_prompt: str) -> dict:
-    """Score MMLU-style rows by answer letter: accuracy (%), mean NLL of the correct letter, per-question results."""
-    result = evaluate_mmlu_rows(model, tokenizer, rows, sys_prompt=sys_prompt, prompt_style="plain")
-    predictions = result["predictions"]
-    return {"acc": result["accuracy"], "nll": result["nll_per_token"],
-            "correct": [int(p["predicted"] == p["expected"]) for p in predictions],
-            "nll_q": [p["nll"] for p in predictions]}
-
-
-def accuracy_by_area(correct: list[int], rows: list[dict]) -> dict[str, float]:
-    """Accuracy (%) of each ``area`` label among ``rows`` (``correct`` is aligned with ``rows``)."""
-    totals: dict[str, list[int]] = {}
-    for flag, row in zip(correct, rows):
-        totals.setdefault(row["area"], []).append(flag)
-    return {area: 100 * sum(flags) / len(flags) for area, flags in totals.items()}

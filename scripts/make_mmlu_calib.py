@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from compress.mmlu import LETTERS, load_mmlu
+from compress.data.mmlu import LETTERS, load_mmlu
 
 
 def sample_text(row: dict) -> str:

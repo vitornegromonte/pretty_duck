@@ -1,6 +1,6 @@
 # ADR 0001: Domain-aware heterogeneous quantization — what was tested and what we decided
 
-- **Status:** Accepted (decisions D1–D10 stand until new evidence overturns them; section 7 lists what is still open)
+- **Status:** Accepted (decisions D1–D11 stand until new evidence overturns them; section 7 lists what is still open)
 - **Date:** 2026-11-10 (updated 2026-11-17 with E15 to E23)
 - **Branch:** `feature/domain-compression`
 - **Related:** `docs/paper/method.pdf` (method and Appendix B), `README.md` ("Findings so far"), `docs/history/REQ.md` / `docs/history/TASK.md` (original spec)
@@ -35,6 +35,7 @@ and 6 full-attention) on an RTX 3090 (`maidai`) for the persona, circuit and all
 | D8 | **Judge protection on group-wise quantization at a bit width where uniform quantization loses accuracy without collapsing, and measure damage by accuracy, not by the NLL of the correct letter** (that NLL fell under quantization, from 5.07 to 3.43, so it is not a damage measure). | E18 |
 | D9 | **Letter accuracy of one quantized model is not a reliable damage measure.** Equivalent quantizers differ by up to ±6 OAB points (E22), so every accuracy comparison from a single rounding realization, including E18 to E20, is weaker than its question-level interval suggests. Use continuous metrics (NLL on neutral text, log-probability of held-out facts, and planned KL to the fp16 model and option-permuted letter probabilities) and several realizations (calibration draws) per condition. | E21, E22 |
 | D10 | **Improve the quantizer before the protection set.** Clipping alone moves GPTQ int3 from a NLL gap of 0.18 to 0.07 over fp16 (E23), more than any circuit effect measured. | E22, E23 |
+| D11 | **Remove the legacy planner, the persona experiments, and the Brazilian-law code from the main branch; keep the results in this record.** The paper studies circuits in general. The removed code is at the tag `v0-pre-refactor` (`git checkout v0-pre-refactor` reproduces E1 to E23 with the old commands). The package moved to `src/compress/` with subpackages `quant`, `interp`, `evaluation`, `data`, `experiments`, and the experiment scripts became one suite (`experiments/suite.py`) with MMLU target and control groups. | refactor of 2026-11-20 |
 
 ## 3. Experiment log
 
@@ -237,6 +238,6 @@ and 6 full-attention) on an RTX 3090 (`maidai`) for the persona, circuit and all
 ## 8. Reproduction pointers
 
 - Seeds: 42; calibration from MMLU `val`, evaluation from `test`; Persona calibration via `scripts/make_persona_calib.py`.
-- Commands per experiment are listed in `README.md` ("Causal probes") and `docs/paper/method.pdf` (Section 8, Appendix B).
+- Commands for E1 to E23 are in the `README.md` and `docs/paper/method.tex` at the tag `v0-pre-refactor`; the current README lists the commands of the new suite.
 - Scripts for E8–E13 take `--model-path Qwen/Qwen3.5-0.8B` and need `PYTHONPATH=.`; each reads the previous stage's JSON (`stats_dom.pt` → `errors_dom.json` → `sensitivity.json` → `circuit_probe.json` → `entanglement.json` / `protect.json` / `alloc_e2e.json`).
 - Tests: `python -m pytest tests/ -q` (offline, CPU).

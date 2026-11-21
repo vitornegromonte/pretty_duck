@@ -29,16 +29,18 @@ from pathlib import Path
 
 import torch
 
-from .calibration import mixed_domain_batches, read_lines, text_batches
-from .circuit import class_matched_top, match_random, top_units, unit_sets
-from .evaluate import token_nll
-from .experiment import CircuitContext, accuracy_by_area, score_rows
-from .gptq import GPTQQuant
-from .gptq_reference import reference_quantize
-from .mmlu import load_mmlu_groups, row_to_text
-from .protect import MixedQuant, outlier_columns
-from .provenance import provenance
-from .quant_probe import fake_quant_group
+from compress.data.calibration import mixed_domain_batches, read_lines, text_batches
+from compress.data.mmlu import load_mmlu_groups, row_to_text
+from compress.evaluation.mcq import accuracy_by_area, score_rows
+from compress.evaluation.text import token_nll
+from compress.experiments.context import CircuitContext
+from compress.interp.scan import top_units
+from compress.interp.units import class_matched_top, match_random, unit_sets
+from compress.provenance import provenance
+from compress.quant.fake import fake_quant_group
+from compress.quant.gptq import GPTQQuant
+from compress.quant.gptq_reference import reference_quantize
+from compress.quant.protect import MixedQuant, outlier_columns
 
 log = logging.getLogger(__name__)
 

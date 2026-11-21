@@ -12,7 +12,7 @@ Input: the path of the approved ADR entry (status `Proposed`) and the dossier fo
 Do this:
 
 1. **Check the spec.** If it is ambiguous, infeasible, or missing a decision rule, stop and report. Do not guess and do not change the decision rule.
-2. **Reuse the library.** Look in `compress/` before you write code. Keep scripts thin. Put logic in the library with a test.
+2. **Reuse the library.** Look in `src/compress/` before you write code. Keep scripts thin. Put logic in the library with a test.
 3. **Write tests first.** At least: a smoke test on the tiny fixtures, an identity test (for example, zero protected columns equals uniform), and a test that weights are restored after the intervention. Run `make test`.
 4. **Reproducibility.** Every random choice takes a seed from an argument. Record a `config` block (arguments, seed, model, git commit and dirty flag, GPU, dtype). Save per-question outputs, not only totals. Make the run resumable. Use at least 5 realizations when the spec asks for a difference.
 5. **Reference check.** Reproduce one saved number from `outputs/` before the new run. If it does not reproduce, stop and report.

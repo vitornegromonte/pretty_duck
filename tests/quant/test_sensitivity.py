@@ -1,8 +1,8 @@
 import pytest
 import torch
 
-from compress.quant import quantize_weight
-from compress.sensitivity import QuantizeLayers, measure_plans, measure_sensitivity
+from compress.quant.formats import quantize_weight
+from compress.quant.sensitivity import QuantizeLayers, measure_plans, measure_sensitivity
 from tests.conftest import CALIB_LINES
 
 Q0 = "model.layers.0.self_attn.q_proj"

@@ -1,7 +1,7 @@
 # pretty_duck
 
 Research code for **domain-aware low-bit quantization of LLMs**, with interpretability tests that find which
-components a domain's knowledge depends on. The library is in `compress/`, experiment drivers are in `scripts/`.
+components a domain's knowledge depends on. The library is in `src/compress/` (subpackages `quant`, `interp`, `evaluation`, `data`, `experiments`). Experiment drivers are in `scripts/`.
 Start at `docs/index.md` to find any document.
 
 ## Read before you claim results
@@ -17,7 +17,7 @@ Start at `docs/index.md` to find any document.
 Run all commands from the repository root with `.venv/bin/python`.
 
 1. Tests: `make test` (offline, CPU). Style: `make lint`. Paper: `make paper`.
-2. A script: `PYTHONPATH=. .venv/bin/python scripts/<name>.py --help`.
+2. A script: `PYTHONPATH=src .venv/bin/python scripts/<name>.py --help`.
 3. Remote files: `make sync-remote-dry`, then `make sync-remote`.
 
 ## Remote GPU machine
@@ -32,9 +32,8 @@ Run all commands from the repository root with `.venv/bin/python`.
 
 - `outputs/` is ignored by git and holds the only copy of some results. Never edit it by hand (a hook blocks it).
 - `/tmp` is a small tmpfs (1.9 GB). If commands fail with "disk full", ask the user to free it.
-- `data/legal_facts/` is an unreviewed draft. Do not present it as validated.
-- Three scripts have their own copy of `class_matched_top`, and four have their own `evaluate()`. Do not add another copy.
-- The package moves to `src/compress/` in a later stage. Do not rename or move modules before the active remote runs finish.
+- The remote machine still has the old flat `compress/` folder. Remove it before the first sync of `src/`, or the old code can shadow the new package. Do not do this while a run uses it.
+- Result files from before the refactor use old keys (`oab_acc`, `law_logp`). New files use `target_acc`, `control_acc`, `fact_logp`. The old code is at the tag `v0-pre-refactor`.
 
 ## Tools
 

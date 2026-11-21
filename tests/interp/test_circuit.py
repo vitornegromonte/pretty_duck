@@ -3,20 +3,10 @@ import random
 import pytest
 import torch
 
-from compress.circuit import (
-    KnowledgeProbe,
-    Scanner,
-    Unit,
-    additivity,
-    build_facts,
-    enumerate_units,
-    make_pairs,
-    match_random,
-    scan_units,
-    split_facts,
-    top_units,
-    unit_sets,
-)
+from compress.interp.damage import KnowledgeProbe, additivity
+from compress.interp.minimal_pairs import build_facts, make_pairs, split_facts
+from compress.interp.scan import Scanner, scan_units, top_units
+from compress.interp.units import Unit, enumerate_units, match_random, unit_sets
 from tests.conftest import CALIB_LINES
 
 TEMPLATE = "w1 w2 {} w3"
@@ -113,7 +103,7 @@ def test_quantization_damage_restores_weights_and_additivity_is_reported(tiny_mo
 
 
 def test_dose_is_reported_and_dose_matching_picks_the_closest_sets(tiny_model, tokenizer):
-    from compress.circuit import dose_matched_random, dose_of
+    from compress.interp.damage import dose_matched_random, dose_of
     batch = make_pairs(_facts(tiny_model, tokenizer), 0)
     probe = KnowledgeProbe(tiny_model, tokenizer, batch.ids_clean, batch.tok_clean)
     units = enumerate_units(tiny_model, 8)
@@ -130,7 +120,7 @@ def test_dose_is_reported_and_dose_matching_picks_the_closest_sets(tiny_model, t
 
 
 def test_core_and_exclusion_follow_the_top_lists():
-    from compress.circuit import core_units, excluding
+    from compress.interp.scan import core_units, excluding
     u = [Unit("l", i, i + 1, "mlp") for i in range(6)]
     mk = lambda order: [{"unit": u[i], "suff": float(len(order) - r), "nec": 0.0} for r, i in enumerate(order)]
     rankings = {"a": mk([0, 1, 2, 3, 4, 5]), "b": mk([1, 0, 4, 5, 2, 3]), "c": mk([5, 1, 0, 2, 3, 4])}
@@ -142,7 +132,7 @@ def test_core_and_exclusion_follow_the_top_lists():
 
 
 def test_batched_neuron_scan_matches_one_unit_at_a_time(tiny_model, tokenizer):
-    from compress.circuit import scan_neurons
+    from compress.interp.scan import scan_neurons
     units = enumerate_units(tiny_model, 8)
     layers = sorted(unit_sets(units))
     sc = Scanner(tiny_model, make_pairs(_facts(tiny_model, tokenizer), 0), layers)

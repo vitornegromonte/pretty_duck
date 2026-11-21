@@ -38,6 +38,7 @@ from compress.facts import FACTS, TEMPLATES
 from compress.gptq import GPTQQuant, gptq_quantize
 from compress.oab import load_oab, register_csv_domains
 from compress.protect import MixedQuant
+from compress.provenance import provenance
 from compress.quant_probe import fake_quant_group
 
 log = lambda m: print(m, file=sys.stderr, flush=True)
@@ -149,6 +150,7 @@ def main() -> None:
     p.add_argument("--n-random", type=int, default=3)
     p.add_argument("--roundings", default="gptq,rtn")
     p.add_argument("--sys-prompt", default="As questões a seguir são de provas da OAB. Responda com a letra da alternativa correta.")
+    p.add_argument("--keep-blocks", action="store_true", help="RTN with protected columns keeps the original 64-column blocks")
     p.add_argument("--only-uniform", action="store_true", help="only the unprotected conditions (rounding cross-checks)")
     p.add_argument("--neutral", default=None, help="text file; adds the mean token NLL on 48 of its lines to every row")
     p.add_argument("--seed", type=int, default=42)
@@ -191,7 +193,8 @@ def main() -> None:
                 "law_logp": k["logp"], "law_acc": k["acc"],
                 **({"neutral_nll": neutral_nll(model, tokenizer, args.neutral)} if args.neutral else {})}
 
-    out = {"config": vars(args) | {"write_weights": write_weights}, "baseline": measure(), "conditions": []}
+    out = {"config": vars(args) | {"write_weights": write_weights}, "baseline": measure(), "conditions": [],
+           "provenance": provenance()}
     log(f"fp16: OAB {out['baseline']['oab_acc']:.1f}% nll {out['baseline']['oab_nll']:.3f}")
 
     def evaluate(name, group, rounding, columns=None, n_units=0):
@@ -199,7 +202,7 @@ def main() -> None:
             ctx = GPTQQuant(model, calib, qlayers, args.bits, columns, args.group,
                             reference_quantize if rounding == "gptq_ref" else gptq_quantize)
         else:
-            ctx = MixedQuant(model, qlayers, args.bits, columns, args.group, offload=True)
+            ctx = MixedQuant(model, qlayers, args.bits, columns, args.group, offload=True, keep_blocks=args.keep_blocks)
         with ctx as q:
             m = measure()
         entry = {"name": f"{rounding}_{name}", "group": group, "rounding": rounding, "bits": args.bits,

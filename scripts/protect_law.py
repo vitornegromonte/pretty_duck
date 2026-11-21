@@ -42,6 +42,7 @@ from compress.evaluate import evaluate_mmlu_rows
 from compress.facts import FACTS, TEMPLATES
 from compress.oab import load_mmmlu, load_oab, register_csv_domains
 from compress.protect import MixedQuant
+from compress.provenance import provenance
 from compress.quant_probe import fake_quant_group
 
 log = lambda m: print(m, file=sys.stderr, flush=True)
@@ -123,7 +124,7 @@ def main() -> None:
                 "oab_correct": [int(x["predicted"] == x["expected"]) for x in pr], "oab_nll_q": [x["nll"] for x in pr],
                 "law_logp": k["logp"], "law_acc": k["acc"]}
 
-    out = {"config": vars(args) | {"n_val_facts": len(batch.tok_clean), "write_weights": write_weights}, "baseline": measure(), "conditions": [],
+    out = {"config": vars(args) | {"n_val_facts": len(batch.tok_clean), "write_weights": write_weights}, "baseline": measure(), "conditions": [], "provenance": provenance(),
            "rows_area": [r.get("area", "oab") for r in rows]}
     log(f"fp16 baseline: OAB {out['baseline']['oab_acc']:.1f}% nll {out['baseline']['oab_nll']:.3f}, law logp {out['baseline']['law_logp']:.2f}")
 

@@ -11,14 +11,17 @@ from __future__ import annotations
 
 import torch
 
-from .quant_probe import fake_quant, fake_quant_group
+from .quant_probe import fake_quant, fake_quant_group, fake_quant_group_keep_blocks
 
 
 class MixedQuant:
     def __init__(self, model: torch.nn.Module, layers: list[str], bits: int,
                  protect: dict[str, torch.Tensor] | None = None, group: int | None = None,
-                 offload: bool = False):
+                 offload: bool = False, keep_blocks: bool = False):
         self.model, self.layers, self.bits, self.group = model, layers, bits, group
+        # keep_blocks: with protected columns, keep the original column blocks instead of forming new blocks over
+        # the rest. The default (False) reproduces the results reported before this option existed.
+        self.keep_blocks = keep_blocks
         self.offload = offload  # keep the saved originals on the host (small GPUs)
         self.protect = protect or {}
         self.total_weights = 0
@@ -42,6 +45,10 @@ class MixedQuant:
                 keep = self.protect.get(name)
                 if keep is None or keep.numel() == 0:
                     w.copy_(self._quant(w).to(w.dtype))
+                    continue
+                if self.keep_blocks and self.group:
+                    self.protected_weights += w.shape[0] * int(torch.unique(keep).numel())
+                    w.copy_(fake_quant_group_keep_blocks(w, self.bits, self.group, keep).to(w.dtype))
                     continue
                 mask = torch.ones(w.shape[1], dtype=torch.bool, device=w.device)
                 mask[keep.to(w.device)] = False

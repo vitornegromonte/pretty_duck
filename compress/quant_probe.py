@@ -46,6 +46,32 @@ def fake_quant_group(W: torch.Tensor, bits: int, group: int = 64) -> torch.Tenso
     return deq[:, :inc]
 
 
+def fake_quant_group_keep_blocks(W: torch.Tensor, bits: int, group: int = 64,
+                                 protect: torch.Tensor | None = None) -> torch.Tensor:
+    """Group-wise quantization that keeps the original blocks when some columns are protected.
+
+    ``fake_quant_group(W[:, rest])`` forms new blocks over the remaining columns, so scattered protected columns
+    shift every block boundary of the layer.  Here the blocks stay at their original columns; protected columns
+    do not enter the scale (the absmax of a block is taken over its unprotected columns) and keep their
+    original values.  Blocks without protected columns are bit-identical to ``fake_quant_group``.
+    """
+    if protect is None or protect.numel() == 0:
+        return fake_quant_group(W, bits, group)
+    if bits < 2 or bits > 8:
+        raise ValueError(f"bits must be in [2, 8], got {bits}")
+    out, inc = W.shape
+    keep = torch.zeros(inc, dtype=torch.bool, device=W.device)
+    keep[protect.to(W.device)] = True
+    pad = (-inc) % group
+    w = torch.nn.functional.pad(W.float(), (0, pad)).reshape(out, -1, group)
+    free = torch.nn.functional.pad(~keep, (0, pad), value=True).reshape(1, -1, group)
+    qmax = 2 ** (bits - 1) - 1
+    absmax = (w.abs() * free).amax(dim=-1, keepdim=True)
+    scale = (absmax / qmax).clamp_min(1e-12)
+    deq = (torch.round(w / scale).clamp(-qmax - 1, qmax) * scale).reshape(out, -1)[:, :inc]
+    return torch.where(keep.unsqueeze(0), W.float(), deq)
+
+
 class QuantizeColumns:
     """Context manager: fake-quantize the selected columns of the named Linears.
 

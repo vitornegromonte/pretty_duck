@@ -43,6 +43,7 @@ from compress.facts import FACTS, TEMPLATES  # noqa: E402
 from compress.gptq import GPTQQuant  # noqa: E402
 from compress.oab import load_mmmlu, load_oab, register_csv_domains  # noqa: E402
 from compress.protect import MixedQuant  # noqa: E402
+from compress.provenance import provenance  # noqa: E402
 from compress.quant_probe import fake_quant_group  # noqa: E402
 
 log = lambda m: print(m, file=sys.stderr, flush=True)
@@ -158,8 +159,10 @@ def main() -> None:
     out = json.loads(Path(args.out).read_text()) if Path(args.out).exists() else None
     if out is None:
         out = {"config": vars(args), "baseline": measure(True), "conditions": [],
+               "provenance": provenance(),
                "mm_area": [r["area"] for r in mm_rows]}
         Path(args.out).write_text(json.dumps(out))
+    out.setdefault("provenance_resumed", []).append(provenance())
     done = {c["name"] for c in out["conditions"]}
     b0 = out["baseline"]
     log(f"fp16: OAB {b0['oab_acc']:.1f}%  MMMLU law {b0['mm_law_acc']:.1f}% other {b0['mm_other_acc']:.1f}%")

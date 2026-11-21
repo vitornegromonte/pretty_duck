@@ -7,7 +7,7 @@
 
     PYTHONPATH=. python scripts/br_law_knowledge.py --model-path Qwen/Qwen3.5-0.8B \
         --oab outputs/data/oab_exams/oab_exams.jsonl \
-        --facts docs/revisao_juridica/fatos_direito_br_rascunho.csv --out outputs/br_law_<model>.json
+        --facts data/legal_facts/fatos_direito_br_rascunho.csv --out outputs/br_law_<model>.json
 """
 
 from __future__ import annotations

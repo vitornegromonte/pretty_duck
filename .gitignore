@@ -2,25 +2,31 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
 
 # Virtual env
 .venv/
 
-# Experiment outputs
+# Experiment outputs and checkpoints
 outputs/
 runs/
 *.pt
-!Persona/data/**
-
-# Hugging Face cache
-.cache/
+!data/**
 outputs_run.log
 
+# Caches and external tool output
+.cache/
 graphify*/
-TASK.md
-REQ.md
-ARCHITECTURE.md
-# LaTeX build files (docs/*.tex and docs/*.pdf are tracked)
-docs/*.aux
-docs/*.log
-docs/*.out
+
+# LaTeX build files
+docs/**/*.aux
+docs/**/*.log
+docs/**/*.out
+docs/**/*.toc
+
+# Claude Code: personal files
+CLAUDE.local.md
+.claude/settings.local.json

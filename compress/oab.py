@@ -4,7 +4,7 @@
 once to JSONL by ``scripts/oab_prepare.py``; ``load_oab`` returns rows in the
 MMLU layout (``question``, ``choices``, ``answer`` index) plus ``area``, so
 ``evaluate_mmlu_rows`` scores them unchanged.  ``load_fact_csv`` reads the
-cloze-fact sheet a jurist reviews (``docs/revisao_juridica``).
+cloze-fact sheet a jurist reviews (``data/legal_facts/``).
 """
 
 from __future__ import annotations
@@ -35,6 +35,22 @@ def load_oab(path: str | Path, *, drop_nullified: bool = True) -> list[dict]:
     return rows
 
 
+# Fact sheets moved from docs/ to data/. Result files written before the move store the old paths.
+LEGACY_DATA_PREFIXES = {"docs/revisao_juridica/": "data/legal_facts/", "docs/controles/": "data/controls/"}
+
+
+def resolve_data_path(path: str | Path) -> Path:
+    """Return ``path`` if it exists, else its new location when it uses a legacy data prefix."""
+    p = Path(path)
+    if p.exists():
+        return p
+    text = str(path).replace("\\", "/")
+    for old, new in LEGACY_DATA_PREFIXES.items():
+        if text.startswith(old) and Path(new + text[len(old):]).exists():
+            return Path(new + text[len(old):])
+    return p
+
+
 def load_fact_csv(path: str | Path, *, drop=("remover",)) -> dict[str, dict]:
     """``{relation: {"template": str, "pairs": [(subject, answer), ...]}}`` from the review sheet.
 
@@ -42,7 +58,7 @@ def load_fact_csv(path: str | Path, *, drop=("remover",)) -> dict[str, dict]:
     (the probe uses its first token).  All rows of a relation must share one template.
     """
     out: dict[str, dict] = {}
-    with open(path, encoding="utf-8", newline="") as f:
+    with open(resolve_data_path(path), encoding="utf-8", newline="") as f:
         for r in csv.DictReader(f):
             if r["status"].strip().lower() in drop:
                 continue
@@ -60,7 +76,7 @@ def load_fact_csv(path: str | Path, *, drop=("remover",)) -> dict[str, dict]:
 FEW_SHOT = {
     "siglas": ("Em direito brasileiro, a sigla MPU significa Ministério Público da União.\n"
                "Em direito brasileiro, a sigla TJDFT significa Tribunal de Justiça do Distrito Federal e dos Territórios.\n"),
-    # non-legal Portuguese control for the sigla task (docs/controles): same language and format, no law
+    # non-legal Portuguese control for the sigla task (data/controls): same language and format, no law
     "siglas_gerais": ("Em português, a sigla IFPE significa Instituto Federal de Pernambuco.\n"
                       "Em português, a sigla FINEP significa Financiadora de Estudos e Projetos.\n"),
     "sedes_trf": ("A sede do Supremo Tribunal Federal fica em Brasília.\n"

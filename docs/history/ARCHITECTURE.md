@@ -1,3 +1,5 @@
+> **Historical note.** The audited Persona code was removed from the repository (see commit `177ff14` for the files). The persona data moved to `data/persona/`. This audit is kept as a record of the starting point.
+
 # Architecture audit — original Persona code
 
 Written before any structural changes, per REQ §4. Files audited: `Persona/mask.py`,

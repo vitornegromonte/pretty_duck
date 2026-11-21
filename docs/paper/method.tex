@@ -597,7 +597,7 @@ python scripts/make_mmlu_calib.py --out-dir outputs/calib2 \
     math=college_mathematics,... law=professional_law,...
 python scripts/make_mmlu_calib.py --split test --out-dir outputs/eval \
     math=... law=...
-python scripts/make_persona_calib.py Persona/data/wealth_train.csv \
+python scripts/make_persona_calib.py data/persona/wealth_train.csv \
     --out-dir outputs/persona_calib
 \end{verbatim}\end{small}
 Statistics, errors, plans and mean ablation:
@@ -613,7 +613,7 @@ python -m compress causal_probe --model-path M --stats stats.pt \
     --eval-target math=outputs/eval/math.txt \
     --eval-other law=outputs/eval/law.txt --out probe.json
 \end{verbatim}\end{small}
-Persona experiments (\code{T} is \code{Persona/data/wealth\_test\_infer.csv}):
+Persona experiments (\code{T} is \code{data/persona/wealth\_test\_infer.csv}):
 \begin{small}\begin{verbatim}
 python scripts/persona_gate.py --model-path Qwen/Qwen3.5-0.8B \
     --test T --out gate.json
@@ -629,11 +629,11 @@ python scripts/oab_prepare.py outputs/data/oab_exams/train.parquet \
     outputs/data/oab_exams/oab_exams.jsonl
 python scripts/br_law_knowledge.py --model-path M \
     --oab outputs/data/oab_exams/oab_exams.jsonl \
-    --facts docs/revisao_juridica/fatos_direito_br_rascunho.csv \
+    --facts data/legal_facts/fatos_direito_br_rascunho.csv \
     --few-shot --out knowledge.json
 python scripts/circuit_probe.py --model-path M \
     --domains capitals,elements,french,direito_siglas \
-    --facts-csv docs/revisao_juridica/fatos_direito_br_rascunho.csv \
+    --facts-csv data/legal_facts/fatos_direito_br_rascunho.csv \
     --csv-domain direito_siglas=siglas --no-quant \
     --ks 8,16,32,64,128 --out probe.json
 python scripts/entanglement.py --model-path M --probe probe.json \
@@ -644,7 +644,7 @@ python scripts/protect_law.py --model-path M --probe probe.json \
 python scripts/protect_law.py ... --bits 4 \
     --controls capitals,elements,french --out controls.json
 \end{verbatim}\end{small}
-The non-legal control uses \code{docs/controles/fatos\_siglas\_gerais\_ptbr.csv} with \code{--csv-domain siglas\_gerais=siglas\_gerais} and is merged into the probe file before \code{protect\_law.py --controls siglas\_gerais}.
+The non-legal control uses \code{data/controls/fatos\_siglas\_gerais\_ptbr.csv} with \code{--csv-domain siglas\_gerais=siglas\_gerais} and is merged into the probe file before \code{protect\_law.py --controls siglas\_gerais}.
 
 Specificity, real baselines and quantizer suites (Section~\ref{sec:stronger}); \code{third\_party/gptq\_ref} holds the authors' \code{gptq.py} and \code{quant.py} and is not versioned:
 \begin{small}\begin{verbatim}
@@ -887,7 +887,7 @@ Limitations: one model family, small fact sets, intervals over questions only, r
 \bibitem{wanda} M.~Sun, Z.~Liu, A.~Bair, J.~Z.~Kolter. A simple and effective pruning approach for large language models. 2023.
 \bibitem{qlora} T.~Dettmers, A.~Pagnoni, A.~Holtzman, L.~Zettlemoyer. QLoRA: efficient finetuning of quantized LLMs (NF4). 2023.
 \bibitem{rome} K.~Meng, D.~Bau, A.~Andonian, Y.~Belinkov. Locating and editing factual associations in GPT. 2022.
-\bibitem{persona} ``Your Language Model Secretly Contains Personality Subnetworks'', the paper whose code is kept in \code{Persona/}.
+\bibitem{persona} ``Your Language Model Secretly Contains Personality Subnetworks'', the paper whose method this study started from (arXiv:2602.07164); its code is no longer in the repository and its data is in \code{data/persona/}.
 \end{thebibliography}
 
 \end{document}

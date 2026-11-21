@@ -3,12 +3,12 @@
 - **Status:** Accepted (decisions D1–D10 stand until new evidence overturns them; section 7 lists what is still open)
 - **Date:** 2026-11-10 (updated 2026-11-17 with E15 to E23)
 - **Branch:** `feature/domain-compression`
-- **Related:** `docs/method.pdf` (method and Appendix B), `README.md` ("Findings so far"), `REQ.md` / `TASK.md` (original spec)
+- **Related:** `docs/paper/method.pdf` (method and Appendix B), `README.md` ("Findings so far"), `docs/history/REQ.md` / `docs/history/TASK.md` (original spec)
 
 ## 1. Context
 
 The project builds on the Persona code (activation-contrast masks that zero weights to shift personality). The goal
-(`TASK.md`) is a **domain-aware, heterogeneous quantization** of a language model: preserve a target domain's
+(`docs/history/TASK.md`) is a **domain-aware, heterogeneous quantization** of a language model: preserve a target domain's
 behaviour while compressing harder in components that tolerate it, with real stored bytes.
 
 The working hypothesis, **H**, was: *a domain-specialization score (activation contrast between a target domain and
@@ -132,9 +132,9 @@ and 6 full-attention) on an RTX 3090 (`maidai`) for the persona, circuit and all
 - **Artifacts:** `compress/circuit.py` (`scan_neurons`), `scripts/neuron_scan.py`, `tests/test_circuit.py`, `outputs/neuron_scan.json`.
 
 ### E15 — How much Brazilian law do the models know? (Qwen3.5-0.8B and 4B)
-- **Data:** `eduagarcia/oab_exams` (2,210 four-option OAB questions, 2010 onward; no license in its card, check before redistributing), converted to JSONL by `scripts/oab_prepare.py`; a 60-fact draft sheet of cloze facts (49 sigla expansions, 5 LIMPE principles, 6 TRF seats) in `docs/revisao_juridica/`, not yet reviewed by a jurist.
+- **Data:** `eduagarcia/oab_exams` (2,210 four-option OAB questions, 2010 onward; no license in its card, check before redistributing), converted to JSONL by `scripts/oab_prepare.py`; a 60-fact draft sheet of cloze facts (49 sigla expansions, 5 LIMPE principles, 6 TRF seats) in `data/legal_facts/`, not yet reviewed by a jurist.
 - **Result:** OAB accuracy on 800 sampled questions 36.9% (0.8B) and 42.4% (4B), chance 25%. Cloze facts known with no examples in the prompt: 1 of 60 (0.8B) and 9 of 60 (4B). With a two-example prefix (examples not in the sheet): siglas 15 (0.8B) and 26 (4B) of the 31 that survive the tokenization and equal-length filter; LIMPE 0 of 5 and TRF seats 1 of 6 for both.
-- **Verdict:** the 4B is the smallest model with a usable law domain, with 26 siglas (13 pairs per half). The sheet needs a jurist's review and more relations (instructions in `docs/revisao_juridica/LEIAME.md`). Siglas measure memorized official names, not legal reasoning.
+- **Verdict:** the 4B is the smallest model with a usable law domain, with 26 siglas (13 pairs per half). The sheet needs a jurist's review and more relations (instructions in `data/legal_facts/LEIAME.md`). Siglas measure memorized official names, not legal reasoning.
 - **Artifacts:** `compress/oab.py`, `scripts/br_law_knowledge.py`, `tests/test_oab.py`, `outputs/br_law_*.json`.
 
 ### E16 — Circuits on Qwen3.5-4B, including Brazilian-law siglas
@@ -162,11 +162,11 @@ and 6 full-attention) on an RTX 3090 (`maidai`) for the persona, circuit and all
 - **Artifacts:** `scripts/protect_law.py --controls`, `outputs/protect_law_4b_controls.json`.
 
 ### E20 — Portuguese non-legal control: general siglas (Qwen3.5-4B, int4, group 64)
-- **Setup:** 54 non-legal Brazilian and international sigla expansions (universities, research bodies, companies, UN agencies) in `docs/controles/fatos_siglas_gerais_ptbr.csv`, same Portuguese template and few-shot format as the legal siglas (prefix examples IFPE and FINEP, not in the list). The 4B knows 29 of them (14/15 pairs); its circuit has held-out sufficiency 0.70 (k=8), 0.83 (k=32), 0.96 (k=128) against about 0 for random sets, with 19 heads and 13 MLP groups at k=32. Its units were then protected under the same int4 setup and 600 OAB questions as E18.
+- **Setup:** 54 non-legal Brazilian and international sigla expansions (universities, research bodies, companies, UN agencies) in `data/controls/fatos_siglas_gerais_ptbr.csv`, same Portuguese template and few-shot format as the legal siglas (prefix examples IFPE and FINEP, not in the list). The 4B knows 29 of them (14/15 pairs); its circuit has held-out sufficiency 0.70 (k=8), 0.83 (k=32), 0.96 (k=128) against about 0 for random sets, with 19 heads and 13 MLP groups at k=32. Its units were then protected under the same int4 setup and 600 OAB questions as E18.
 - **Result:** OAB accuracy 35.2% (k=32) and 32.3% (k=128), against 35.0% for uniform int4. Gain over uniform +0.2 [-1.2, +1.7] and -2.7 [-4.3, -1.0]; over the random sets -0.4 [-1.8, +0.9] and -3.3 [-4.9, -1.8]. The law circuit beats it by +3.0 [+1.3, +4.7] and +5.0 [+3.0, +7.0] points.
 - **Verdict:** same language and task format but non-legal content does not give the gain, so the E18 gain is not explained by Portuguese or by the sigla format. Among the eight protected sets of each size (law, four control circuits, three random draws) the law circuit is the best at both sizes (+3.2 and +2.3 points over uniform; the best of the others are +1.7 and +1.7), and some circuits hurt (down to -2.7), so which units are protected matters. With eight sets the chance of the law circuit being the best by luck would be 1 in 8 per size, so this is supportive, not conclusive. Intervals cover questions only; one seed.
 - **Still open:** a non-law Portuguese benchmark (does the law circuit help only law?), another legal task (the reviewed sheet), more random draws and seeds, and a larger model.
-- **Artifacts:** `docs/controles/fatos_siglas_gerais_ptbr.csv`, `compress/oab.py` (`FEW_SHOT["siglas_gerais"]`), `outputs/circuit_probe_4b_gerais.json`, `outputs/protect_law_4b_gerais.json`.
+- **Artifacts:** `data/controls/fatos_siglas_gerais_ptbr.csv`, `compress/oab.py` (`FEW_SHOT["siglas_gerais"]`), `outputs/circuit_probe_4b_gerais.json`, `outputs/protect_law_4b_gerais.json`.
 
 ### E21 — Does the law circuit help only law? Portuguese MMMLU (Qwen3.5-4B, int4, group 64, RTN)
 - **Setup:** 500 law questions (professional law, jurisprudence, international law; mostly US law translated) and 500 non-law questions from MMMLU PT-BR, one seeded sample for every condition; protected sets of 32 and 128 units (0.30% and 1.08%), 6 random draws per size, the general-siglas circuit as control; paired bootstrap over questions.
@@ -203,7 +203,7 @@ and 6 full-attention) on an RTX 3090 (`maidai`) for the persona, circuit and all
 - Any inference speedup: all quantization here is simulated on dequantized weights.
 - That the law circuit is law-specific (E21) or that circuit protection adds anything on top of GPTQ (E22); the protection effect of E18 to E20 may be rounding noise.
 
-**Costs:** several experiments need a GPU machine (`maidai`); `outputs/` is gitignored, so results live only in local and remote `outputs/` directories and in `docs/method.pdf`.
+**Costs:** several experiments need a GPU machine (`maidai`); `outputs/` is gitignored, so results live only in local and remote `outputs/` directories and in `docs/paper/method.pdf`.
 
 ## 5. Threats to validity (apply to the whole record)
 
@@ -237,6 +237,6 @@ and 6 full-attention) on an RTX 3090 (`maidai`) for the persona, circuit and all
 ## 8. Reproduction pointers
 
 - Seeds: 42; calibration from MMLU `val`, evaluation from `test`; Persona calibration via `scripts/make_persona_calib.py`.
-- Commands per experiment are listed in `README.md` ("Causal probes") and `docs/method.pdf` (Section 8, Appendix B).
+- Commands per experiment are listed in `README.md` ("Causal probes") and `docs/paper/method.pdf` (Section 8, Appendix B).
 - Scripts for E8–E13 take `--model-path Qwen/Qwen3.5-0.8B` and need `PYTHONPATH=.`; each reads the previous stage's JSON (`stats_dom.pt` → `errors_dom.json` → `sensitivity.json` → `circuit_probe.json` → `entanglement.json` / `protect.json` / `alloc_e2e.json`).
 - Tests: `python -m pytest tests/ -q` (offline, CPU).

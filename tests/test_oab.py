@@ -59,12 +59,12 @@ def test_register_csv_domains_adds_few_shot_prefixed_templates(tmp_path):
 
 def test_general_siglas_control_sheet_is_clean_and_disjoint_from_its_prompt_examples():
     from compress.oab import FEW_SHOT
-    got = load_fact_csv("docs/controles/fatos_siglas_gerais_ptbr.csv")
+    got = load_fact_csv("data/controls/fatos_siglas_gerais_ptbr.csv")
     pairs = got["siglas_gerais"]["pairs"]
     subjects = [s for s, _ in pairs]
     assert len(pairs) >= 50 and len(set(subjects)) == len(subjects)
     assert not any(f"sigla {s} significa" in FEW_SHOT["siglas_gerais"] for s in subjects)
-    legal = {s for s, _ in load_fact_csv("docs/revisao_juridica/fatos_direito_br_rascunho.csv")["siglas"]["pairs"]}
+    legal = {s for s, _ in load_fact_csv("data/legal_facts/fatos_direito_br_rascunho.csv")["siglas"]["pairs"]}
     assert not legal & set(subjects)  # a control must not reuse the legal sigla subjects
 
 
@@ -80,3 +80,12 @@ def test_load_mmmlu_splits_law_and_other_by_position(tmp_path):
     assert all(r["subject"] == "professional_law" for r in got[:4]) and all(r["subject"] == "astronomy" for r in got[4:])
     assert all(len(r["choices"]) == 4 and 0 <= r["answer"] < 4 for r in got)
     assert got == load_mmmlu(path, n_law=4, n_other=6, seed=1) and got != load_mmmlu(path, n_law=4, n_other=6, seed=2)
+
+
+def test_legacy_fact_sheet_paths_still_resolve_after_the_move_to_data():
+    from compress.oab import resolve_data_path
+    old = "docs/revisao_juridica/fatos_direito_br_rascunho.csv"
+    assert resolve_data_path(old).as_posix() == "data/legal_facts/fatos_direito_br_rascunho.csv"
+    assert resolve_data_path("docs/controles/fatos_siglas_gerais_ptbr.csv").exists()
+    assert resolve_data_path("no/such/file.csv").as_posix() == "no/such/file.csv"
+    assert load_fact_csv(old)["siglas"]["pairs"]

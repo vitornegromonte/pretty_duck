@@ -1,12 +1,14 @@
-# Domain-aware weight compression (built on Persona)
+# Domain-aware weight compression
 
-Implements the pipeline described in `REQ.md` / `TASK.md`: per-domain
+Implements the pipeline described in `docs/history/REQ.md` / `docs/history/TASK.md`: per-domain
 activation statistics, diagonal quantization-error estimation, greedy
 heterogeneous bit allocation per Linear block, real packed storage, and
-multiple-choice evaluation.  The original Persona code lives untouched in
-`Persona/` (see `ARCHITECTURE.md` for the audit that maps what it does and
-what is reused).  Design and honesty rules are in the module docstrings of
-`compress/`.
+multiple-choice evaluation.  The project started from the Persona method
+(Ye et al., 2026, arXiv:2602.07164); its code is no longer part of this
+repository (see `docs/history/ARCHITECTURE.md` for the original audit).  Design and honesty
+rules are in the module docstrings of `compress/`.
+
+> Where to find things: start at `docs/index.md`. Rules for contributors and for Claude Code are in `CLAUDE.md` and `.claude/rules/`.
 
 ## Install
 
@@ -23,8 +25,8 @@ functional API runs on CPU, its `nn.Module` layers need CUDA).
 ```bash
 python -m compress collect_stats \
     --model-path HuggingFaceTB/SmolLM-135M \
-    --calib wealth=Persona/data/wealth_train.csv \
-    --calib honesty=Persona/data/h_train.csv \
+    --calib wealth=data/persona/wealth_train.csv \
+    --calib honesty=data/persona/h_train.csv \
     --out stats.pt --n-samples 128 --max-len 256 --seed 42
 
 python -m compress estimate_quant_error \
@@ -42,8 +44,8 @@ python -m compress quantize_model \
 
 python -m compress evaluate_compression \
     --model-path HuggingFaceTB/SmolLM-135M --compressed-dir compressed/ \
-    --test wealth=Persona/data/wealth_test_infer.csv \
-    --test honesty=Persona/data/h_test_infer.csv \
+    --test wealth=data/persona/wealth_test_infer.csv \
+    --test honesty=data/persona/h_test_infer.csv \
     --out report.json
 
 # Four-way MMLU, scored by answer letter (NLL per token + per-question predictions).
@@ -69,7 +71,7 @@ python -m compress evaluate_compression \
 `wanda` (domain-agnostic activation norm), `random`, or `none`.
 `contrast`/`inverse`/`contrast_abs` also need `--mask-seek` and `--mask-reject`
 from the stats file.  `--mask-only-mlp` restricts masking to the MLP projections
-(Persona's `prune_only_mlp`), leaving attention and the head intact.
+(the `prune_only_mlp` option of the original Persona code), leaving attention and the head intact.
 `--mask-z-clip` bounds `|z|` so a few near-zero-variance channels cannot
 dominate the per-row ranking.  The mask is applied after any `--compressed-dir`
 weights are loaded, per output row, in place; the report's `mask` block records
@@ -138,13 +140,13 @@ the target minus the mean increase on the other domains, with a bootstrap CI.
 Persona experiments (minimal-pair patching). The scripts need `PYTHONPATH=.`:
 
 ```bash
-python scripts/make_persona_calib.py Persona/data/wealth_train.csv \
+python scripts/make_persona_calib.py data/persona/wealth_train.csv \
     --out-dir outputs/persona_calib        # seek.txt / reject.txt, parsed with csv
 python -m compress collect_stats --model-path Qwen/Qwen3.5-0.8B \
     --calib seek=outputs/persona_calib/seek.txt \
     --calib reject=outputs/persona_calib/reject.txt --out stats_persona.pt
 
-T=Persona/data/wealth_test_infer.csv
+T=data/persona/wealth_test_infer.csv
 # does the persona prompt move the margin? includes shuffled/irrelevant controls
 python scripts/persona_gate.py --model-path Qwen/Qwen3.5-0.8B --test $T --out gate.json
 # sufficiency; add --reverse for necessity (patch the other prompt's activations in)
@@ -186,12 +188,12 @@ only as stronger interventions; nothing is stored in those formats.
   exact payload formulas (asserted against packed tensors in the tests), the
   reports use measured bytes.
 
-## Findings so far (measured; see `docs/method.pdf`)
+## Findings so far (measured; see `docs/paper/method.pdf`)
 
 Current method: find the sparse circuit a domain's knowledge depends on by minimal-pair patching, validate it
 on held-out facts, and protect its weight columns at full precision while the rest is quantized group-wise at a
 low bit width. Twenty-three experiments (E1 to E23) are summarized in Section "Summary of the experiments" of
-`docs/method.pdf` and recorded with numbers and caveats in
+`docs/paper/method.pdf` and recorded with numbers and caveats in
 `docs/adr/0001-domain-aware-quantization-experiment-record.md`.
 
 * **What works.**
@@ -214,7 +216,7 @@ low bit width. Twenty-three experiments (E1 to E23) are summarized in Section "S
   explained by perturbation dose; the diagonal error `D` is uncorrelated with the measured damage per layer;
   quantizing persona-selected channels at 3-4 bits is no worse than random channels; no method helps at int3 or int2.
 * **Limits.** One model family, one seed per condition (rounding noise is not sampled), small fact sets (13-15 validation pairs for the legal siglas, which are an
-  unreviewed draft in `docs/revisao_juridica/`), intervals over questions only, simulated quantization (no speedup).
+  unreviewed draft in `data/legal_facts/`), intervals over questions only, simulated quantization (no speedup).
   The legal circuit is the best of eight protected sets at each size, which is supportive, not conclusive.
 
 ## Limitations
@@ -233,14 +235,15 @@ low bit width. Twenty-three experiments (E1 to E23) are summarized in Section "S
   tower only; the vision tower is neither collected nor compressed.
 * Prompts follow the tokenizer's chat template by default (`--prompt-style
   auto`).  Use `plain` for base checkpoints that were never chat-tuned, or
-  `llama2` to reproduce the original Persona protocol.
+  `llama2` for the Llama-2 `[INST]` wrapper used by the original Persona evaluation.
 * The allocator accepts portable formats only (`fp16/int8/int4/nf4`);
   `bnb_nf4` can be used for uniform experiments via `estimate_quant_error`
   and direct quantization, but has no exact byte formula in the allocator.
 * Local development/tests run on CPU with tiny models; real-model runs need
   a machine with enough RAM (the SmolLM-135M experiment needs ~2 GB free).
 * Persona's sparse-mask method (weight zeroing) is a different mechanism from
-  quantization and is preserved untouched in `Persona/`.
+  quantization. Its code was removed from this repository (it is in the git
+  history, commit `177ff14`); the persona test data is in `data/persona/`.
 * The Persona CSVs contain multi-line fields; read them with `csv` (as
   `scripts/make_persona_calib.py` does), not line by line, or headers and split
   rows end up in the calibration text.

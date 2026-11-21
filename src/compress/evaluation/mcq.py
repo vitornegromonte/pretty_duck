@@ -23,7 +23,7 @@ def build_prompt(
 
     ``auto`` uses the tokenizer's chat template when it has one and plain
     completion otherwise.  Base checkpoints without SFT are better served by
-    ``plain``; ``llama2`` uses the Llama-2 ``[INST]`` wrapper of the original Persona evaluation.
+    ``plain``; ``llama2`` uses the Llama-2 ``[INST]`` wrapper.
     """
     if style not in PROMPT_STYLES:
         raise ValueError(f"unknown prompt style {style!r}")

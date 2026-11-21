@@ -30,7 +30,7 @@ from compress import stats as stats_mod
 from compress.circuit import (KnowledgeProbe, Scanner, additivity, build_facts, dose_matched_random,
                               enumerate_units, make_pairs, match_random, scan_units, split_facts,
                               top_units, unit_sets)
-from compress.cli import _load_model
+from compress.models import load_model
 from compress.facts import FACTS, TEMPLATES
 from compress.oab import register_csv_domains
 
@@ -68,7 +68,7 @@ def main() -> None:
     if args.csv_domain:
         register_csv_domains(args.facts_csv, args.csv_domain, FACTS, TEMPLATES)
 
-    model, tokenizer = _load_model(args.model_path)
+    model, tokenizer = load_model(args.model_path)
     units = enumerate_units(model, args.mlp_group)
     layers = sorted(unit_sets(units))
     V, neutral = None, None

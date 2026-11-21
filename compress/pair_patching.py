@@ -1,76 +1,25 @@
-"""Minimal-pair activation patching on the persona answer margin.
+"""Hooks for activation patching over the last positions of a sequence.
 
-A *pair* is one question and answer option scored under two system prompts:
-``clean`` (e.g. the seek persona) and ``corrupt`` (e.g. the reject persona).
-The question and answer tokens are identical, so the two token sequences share
-a common suffix and positions can be aligned from the end.  We run the clean
-sequence, record every Linear input over that suffix, then re-run the corrupt
-sequence while overwriting chosen input channels with the clean values.
-
-    margin(run) = logp(persona-matching option) - logp(other option)
-
-and the *restoration* of an intervention is
-
-    sum_q [margin_patched - margin_corrupt] / sum_q [margin_clean - margin_corrupt].
-
-Unlike mean ablation, the patched values are real activations of the same
-prompt, so the perturbation is matched in size by construction.  Patching
-*every* Linear input over the suffix reproduces the clean run exactly (all
-residual contributions at those positions then come from clean inputs), which
-is the built-in 100% reference.  Forward-only, batch size 1, no padding.
+A clean and a corrupt prompt end in the same tokens, so positions are aligned from the end. ``SuffixCapture``
+records the input of chosen Linear layers over the last ``suffix`` positions of the clean run. ``SuffixPatch``
+overwrites chosen input channels of the corrupt run with those values. The patched values are real activations of
+a real prompt, so the size of the perturbation is matched by construction. Patching every Linear input over the
+suffix reproduces the clean run exactly, which is the built-in 100% reference. ``ratio_ci`` gives a ratio of sums
+over questions with a bootstrap interval. Forward-only. Both hooks are removed on exit, also on errors.
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 
 import torch
 
-from .evaluate import build_prompt
 
-
-@dataclass
 class Pair:
     ids_clean: torch.Tensor      # (1, n_clean)
     ids_corrupt: torch.Tensor    # (1, n_corrupt)
     n_answer: int                # answer tokens (identical in both)
     suffix: int                  # common suffix length, >= n_answer + 1
-
-
-def common_suffix(a: list[int], b: list[int]) -> int:
-    n = 0
-    while n < min(len(a), len(b)) and a[-1 - n] == b[-1 - n]:
-        n += 1
-    return n
-
-
-def _encode(tokenizer, system_prompt: str, question: str, option: str, style: str):
-    prompt = build_prompt(system_prompt, f"{question}\n\nAnswer:", tokenizer, style)
-    prompt_ids = tokenizer(prompt)["input_ids"]
-    full_ids = tokenizer(prompt + " " + option)["input_ids"]
-    if full_ids[: len(prompt_ids)] != prompt_ids or len(full_ids) <= len(prompt_ids):
-        return None  # the answer does not tokenize as a clean continuation
-    return full_ids, len(full_ids) - len(prompt_ids)
-
-
-def encode_pair(tokenizer, question: str, option: str, clean_sys: str, corrupt_sys: str,
-                style: str = "auto") -> Pair | None:
-    """Token sequences for one (question, option) under both prompts, or ``None`` to skip."""
-    c = _encode(tokenizer, clean_sys, question, option, style)
-    k = _encode(tokenizer, corrupt_sys, question, option, style)
-    if c is None or k is None or c[1] != k[1]:
-        return None
-    suffix = common_suffix(c[0], k[0])
-    if suffix < c[1] + 1:
-        return None
-    return Pair(torch.tensor([c[0]]), torch.tensor([k[0]]), c[1], suffix)
-
-
-def answer_logprob(logits: torch.Tensor, ids: torch.Tensor, n_answer: int) -> float:
-    """Summed log-probability of the last ``n_answer`` tokens of ``ids`` (batch size 1)."""
-    pred = logits[0, -n_answer - 1:-1].float().log_softmax(-1)
-    return float(pred.gather(-1, ids[0, -n_answer:].unsqueeze(-1).to(pred.device)).sum())
 
 
 class SuffixCapture:
@@ -137,7 +86,7 @@ def layer_of(name: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def _ratio_ci(num: torch.Tensor, den: torch.Tensor, n_boot: int, seed: int):
+def ratio_ci(num: torch.Tensor, den: torch.Tensor, n_boot: int, seed: int):
     """Ratio of sums over questions with a percentile bootstrap CI."""
     g = torch.Generator().manual_seed(seed)
     point = float(num.sum() / den.sum())
@@ -150,7 +99,6 @@ def _ratio_ci(num: torch.Tensor, den: torch.Tensor, n_boot: int, seed: int):
     return point, lo, hi
 
 
-@torch.no_grad()
 def pair_patch_probe(
     model: torch.nn.Module,
     tokenizer,

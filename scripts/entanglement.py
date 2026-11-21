@@ -28,7 +28,7 @@ from pathlib import Path
 
 from compress.circuit import (Scanner, Unit, build_facts, core_units, enumerate_units, excluding,
                               make_pairs, match_random, split_facts, top_units, unit_sets)
-from compress.cli import _load_model
+from compress.models import load_model
 from compress.facts import FACTS, TEMPLATES
 from compress.oab import register_csv_domains
 
@@ -55,7 +55,7 @@ def main() -> None:
     domains = list(probe["domains"])
     seed = probe["config"]["seed"]
     mlp_group = probe["config"]["mlp_group"]
-    model, tokenizer = _load_model(args.model_path)
+    model, tokenizer = load_model(args.model_path)
     units = enumerate_units(model, mlp_group)
     kind = {(u.layer, u.start, u.stop): u for u in units}
     layers = sorted(unit_sets(units))

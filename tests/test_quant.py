@@ -1,4 +1,3 @@
-import math
 
 import pytest
 import torch
@@ -7,16 +6,11 @@ from compress.quant import (
     NF4_BLOCKSIZE,
     NF4_CODEBOOK,
     PORTABLE_FORMATS,
-    block_importance,
     dequantize_weight,
-    diagonal_error,
     is_available,
     quant_error,
-    parse_unit,
     quantize_weight,
-    row_groups,
     storage_nbytes,
-    unit_name,
 )
 
 
@@ -113,46 +107,3 @@ def test_unknown_format_rejected():
     assert not ok and "unknown" in reason
     with pytest.raises(ValueError):
         quantize_weight(torch.randn(2, 2), "int3")
-
-
-def test_diagonal_error_hand_computed():
-    E = torch.ones(2, 3)
-    V = torch.tensor([1.0, 2.0, 3.0])
-    assert diagonal_error(E, V) == pytest.approx(6.0 * 2)  # sum_ij E^2 V_j = 2*(1+2+3)
-
-
-def test_block_importance_hand_computed():
-    W = torch.tensor([[1.0, -2.0]])
-    A = torch.tensor([0.5, 0.25])
-    assert block_importance(W, A) == pytest.approx(1.0)
-
-
-def test_diagonal_error_scales_with_second_moment():
-    W = torch.randn(4, 8)
-    q = quantize_weight(W, "int4")
-    E = quant_error(W, q)
-    v_small = torch.full((8,), 1e-6)
-    v_big = torch.full((8,), 1e6)
-    assert diagonal_error(E, v_big) > diagonal_error(E, v_small) * 1e11
-    assert math.isfinite(diagonal_error(E, v_small))
-
-
-@pytest.mark.parametrize("fmt", ["fp16", "int8", "int4", "nf4"])
-@pytest.mark.parametrize("inc", [15, 48])  # odd width: int4 rows share a packed byte
-def test_row_group_quantizes_identically_to_the_same_rows_in_the_full_matrix(fmt, inc):
-    torch.manual_seed(1)
-    W = torch.randn(10, inc)
-    full = quantize_weight(W, fmt).dequant
-    for r0, r1 in row_groups(10, 4):
-        group = quantize_weight(W[r0:r1], fmt)
-        assert torch.equal(group.dequant, full[r0:r1])
-        assert group.nbytes == storage_nbytes((r1 - r0, inc), fmt)
-
-
-def test_unit_names_round_trip_and_row_groups_tile():
-    assert parse_unit(unit_name("model.layers.0.mlp.up_proj", 64, 128)) == (
-        "model.layers.0.mlp.up_proj", (64, 128))
-    assert parse_unit("model.layers.0.mlp.up_proj") == ("model.layers.0.mlp.up_proj", None)
-    assert row_groups(10, 4) == [(0, 4), (4, 8), (8, 10)]
-    with pytest.raises(ValueError):
-        row_groups(10, 0)

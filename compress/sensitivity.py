@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import torch
 
-from .patching import line_nll
+from .evaluate import line_nll
 from .quant import quantize_weight
 
 

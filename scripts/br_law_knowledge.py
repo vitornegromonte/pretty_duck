@@ -20,7 +20,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from compress.circuit import build_facts
-from compress.cli import _load_model
+from compress.models import load_model
 from compress.evaluate import evaluate_mmlu_rows
 from compress.oab import FEW_SHOT, load_fact_csv, load_oab
 
@@ -39,7 +39,7 @@ def main() -> None:
     p.add_argument("--out", required=True)
     args = p.parse_args()
 
-    model, tokenizer = _load_model(args.model_path)
+    model, tokenizer = load_model(args.model_path)
     oab = None
     if not args.skip_oab:
         rows = load_oab(args.oab)

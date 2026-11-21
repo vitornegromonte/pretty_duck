@@ -28,8 +28,8 @@ from dataclasses import dataclass
 
 import torch
 
-from .pair_patching import SuffixCapture, SuffixPatch, _ratio_ci
-from .patching import line_nll
+from .pair_patching import SuffixCapture, SuffixPatch, ratio_ci
+from .evaluate import line_nll
 from .quant_probe import QuantizeColumns
 
 WRITE_SUFFIXES = ("self_attn.o_proj", "linear_attn.out_proj", "mlp.down_proj")
@@ -241,7 +241,7 @@ class Scanner:
     def _ratio(self, num: torch.Tensor, n_boot: int, seed: int):
         num, den = num.double().cpu(), self.den.double().cpu()
         if n_boot:
-            return _ratio_ci(num, den, n_boot, seed)
+            return ratio_ci(num, den, n_boot, seed)
         return float(num.sum() / den.sum())
 
 

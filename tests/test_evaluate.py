@@ -9,6 +9,7 @@ from compress.evaluate import (
     build_prompt,
     evaluate_mmlu_rows,
     format_mmlu_question,
+    line_nll,
     option_logprob,
     option_nll,
 )
@@ -107,3 +108,17 @@ def test_evaluate_mmlu_rows_reports_accuracy_and_nll(tiny_model, tokenizer):
     assert len(result["predictions"]) == 2
     assert result["predictions"][0]["expected"] == "A"
     assert set(result["predictions"][0]["option_nll"]) == {"A", "B", "C", "D"}
+
+
+def test_line_nll_ignores_padding(tiny_model, tokenizer):
+    short, long = "w1 w2 w3", "w5 w4 w3 w2 w1 w1 w2 w3"
+    alone = line_nll(tiny_model, tokenizer, [short], batch_size=1)[0]
+    batched = line_nll(tiny_model, tokenizer, [short, long], batch_size=2)[0]
+    assert batched == pytest.approx(alone, abs=1e-5)
+    tokenizer.padding_side = "left"
+    try:
+        assert line_nll(tiny_model, tokenizer, [short, long], batch_size=2)[0] == pytest.approx(
+            alone, abs=1e-5)
+        assert tokenizer.padding_side == "left"  # caller's setting is restored
+    finally:
+        tokenizer.padding_side = "right"

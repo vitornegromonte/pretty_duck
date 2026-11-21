@@ -10,13 +10,12 @@ when it has one, so the evaluator works across model families.
 
 from __future__ import annotations
 
-import csv
 import sys
 import time
 
 import torch
 
-from .mmlu import LETTERS, load_mmlu
+from .mmlu import LETTERS
 
 PROMPT_STYLES = ("auto", "chat", "plain", "llama2")
 
@@ -126,63 +125,6 @@ def option_logprob(
     )[0]
 
 
-def evaluate_mc(
-    model,
-    tokenizer,
-    test_file: str,
-    *,
-    negate: bool = False,
-    sys_prompt: str = "",
-    max_questions: int | None = None,
-    prompt_style: str = "auto",
-) -> dict:
-    """Evaluate one ``*_test_infer.csv`` file; returns a metrics dict.
-
-    Accuracy is measured against the ``matching`` column (or its flip when
-    ``negate=True``).  Latency is wall-clock per question (two forward passes).
-    """
-    model.eval()
-    device = next(model.parameters()).device
-    correct = total = 0
-    total_ms = 0.0
-    with open(test_file, encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            if max_questions is not None and total >= max_questions:
-                break
-            question, a, b = row["question"].strip(), row["A"].strip(), row["B"].strip()
-            matching = row["matching"].strip().upper()
-            expected = matching if not negate else ("B" if matching == "A" else "A")
-
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            t0 = time.perf_counter()
-            logp_a = option_logprob(
-                model, tokenizer, sys_prompt, question, a, device, prompt_style
-            )
-            logp_b = option_logprob(
-                model, tokenizer, sys_prompt, question, b, device, prompt_style
-            )
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            total_ms += (time.perf_counter() - t0) * 1000.0
-
-            correct += int(("A" if logp_a >= logp_b else "B") == expected)
-            total += 1
-
-    if total == 0:
-        raise ValueError(f"no questions evaluated from {test_file}")
-    return {
-        "test_file": str(test_file),
-        "negate": negate,
-        "sys_prompt": sys_prompt,
-        "prompt_style": prompt_style,
-        "n": total,
-        "correct": correct,
-        "accuracy": 100.0 * correct / total,
-        "avg_latency_ms": total_ms / total,
-    }
-
-
 def format_mmlu_question(row: dict) -> str:
     """Lay out an MMLU row with lettered choices, ready for an ``Answer:`` suffix."""
     lines = [row["question"].strip()]
@@ -267,25 +209,26 @@ def evaluate_mmlu_rows(
     }
 
 
-def evaluate_mmlu(
-    model,
-    tokenizer,
-    subject: str,
-    split: str = "test",
-    *,
-    sys_prompt: str = "",
-    max_questions: int | None = None,
-    prompt_style: str = "auto",
-    cache_dir=None,
-) -> dict:
-    """Load one MMLU subject/split and score it.  See ``load_mmlu`` for caching."""
-    rows = load_mmlu(subject, split, cache_dir)
-    result = evaluate_mmlu_rows(
-        model,
-        tokenizer,
-        rows,
-        sys_prompt=sys_prompt,
-        max_questions=max_questions,
-        prompt_style=prompt_style,
-    )
-    return {"dataset": "cais/mmlu", "subject": subject, "split": split, **result}
+@torch.no_grad()
+def line_nll(
+    model: torch.nn.Module, tokenizer, lines: list[str], *, batch_size: int = 8, max_len: int = 128
+) -> list[float]:
+    """Mean next-token NLL per line, over valid (non-padding) tokens only."""
+    model.eval()
+    device = next(model.parameters()).device
+    side, tokenizer.padding_side = tokenizer.padding_side, "right"  # positions stay 0..n-1
+    try:
+        out: list[float] = []
+        for i in range(0, len(lines), batch_size):
+            batch = tokenizer(lines[i:i + batch_size], return_tensors="pt", padding=True,
+                              truncation=True, max_length=max_len)
+            ids, mask = batch["input_ids"].to(device), batch["attention_mask"].to(device)
+            logits = model(input_ids=ids, attention_mask=mask).logits[:, :-1].float()
+            nll = torch.nn.functional.cross_entropy(
+                logits.transpose(1, 2), ids[:, 1:], reduction="none"
+            )
+            valid = mask[:, 1:].float()
+            out.extend(((nll * valid).sum(1) / valid.sum(1).clamp_min(1)).tolist())
+    finally:
+        tokenizer.padding_side = side
+    return out

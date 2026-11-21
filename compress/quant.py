@@ -124,26 +124,6 @@ def storage_nbytes(shape: tuple[int, int], fmt: str) -> int:
 # analytic bytes are ``storage_nbytes((rows, in_features), fmt)``.  A finer
 # allocation unit is therefore named ``"<layer>@<r0>:<r1>"`` (rows [r0, r1)).
 
-def unit_name(layer: str, r0: int, r1: int) -> str:
-    return f"{layer}@{r0}:{r1}"
-
-
-def parse_unit(name: str) -> tuple[str, tuple[int, int] | None]:
-    """Split a unit name into ``(layer, (r0, r1))``; whole layers give ``None``."""
-    layer, sep, rows = name.partition("@")
-    if not sep:
-        return layer, None
-    r0, _, r1 = rows.partition(":")
-    return layer, (int(r0), int(r1))
-
-
-def row_groups(out: int, group: int) -> list[tuple[int, int]]:
-    """Consecutive ``[r0, r1)`` row ranges of at most ``group`` rows."""
-    if group < 1:
-        raise ValueError(f"row group must be >= 1, got {group}")
-    return [(r, min(r + group, out)) for r in range(0, out, group)]
-
-
 # ---------------------------------------------------------------------------
 # packing helpers (4-bit formats store two signed weights per byte)
 # ---------------------------------------------------------------------------
@@ -291,17 +271,3 @@ def quant_error(W: torch.Tensor, q: QuantizedTensor) -> torch.Tensor:
     """E = W - W_q in float32."""
     return W.float() - q.dequant
 
-
-def diagonal_error(E: torch.Tensor, V: torch.Tensor) -> float:
-    """Cheap diagonal estimate D = sum_ij E_ij^2 * V_j.
-
-    Interpreted as E[||x E^T||^2] under the assumption that input channels are
-    uncorrelated (V = E[h_j^2] from stats.py).  Ignores cross-channel
-    correlation; a local approximation, not the final model loss.
-    """
-    return float((E.double().square() * V.double()).sum().item())
-
-
-def block_importance(W: torch.Tensor, A: torch.Tensor) -> float:
-    """I_g = sum_ij |W_ij| * A_j with A_j = E|h_j| (Wanda-style aggregate)."""
-    return float((W.double().abs() * A.double()).sum().item())

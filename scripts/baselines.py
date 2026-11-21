@@ -32,7 +32,7 @@ import torch
 from compress import stats as stats_mod
 from compress.circuit import (KnowledgeProbe, build_facts, enumerate_units, make_pairs, match_random,
                               split_facts, top_units, unit_sets)
-from compress.cli import _load_model
+from compress.models import load_model
 from compress.evaluate import evaluate_mmlu_rows
 from compress.facts import FACTS, TEMPLATES
 from compress.gptq import GPTQQuant, gptq_quantize
@@ -162,7 +162,7 @@ def main() -> None:
     if probe["config"].get("csv_domain"):
         register_csv_domains(probe["config"]["facts_csv"], probe["config"]["csv_domain"], FACTS, TEMPLATES)
     seed = probe["config"]["seed"]
-    model, tokenizer = _load_model(args.model_path)
+    model, tokenizer = load_model(args.model_path)
     modules = dict(model.named_modules())
     units = enumerate_units(model, probe["config"]["mlp_group"])
     by_key = {(u.layer, u.start, u.stop): u for u in units}

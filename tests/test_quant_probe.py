@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from compress.quant_probe import QuantizeColumns, fake_quant, quant_persona_probe
+from compress.quant_probe import QuantizeColumns, fake_quant
 
 Q0 = "model.layers.0.self_attn.q_proj"
 ROWS = [
@@ -57,18 +57,3 @@ def test_dose_grows_with_coarser_quantization(tiny_model):
         with QuantizeColumns(tiny_model, sets, bits, V) as q:
             doses.append(q.dose)
     assert doses == sorted(doses) and doses[-1] > 100 * doses[0]
-
-
-def test_probe_retention_is_one_without_damage_and_reports_damage(tiny_model, tokenizer):
-    all_layers = {n: torch.arange(m.in_features) for n, m in tiny_model.named_modules()
-                  if isinstance(m, torch.nn.Linear) and n != "lm_head"}
-    none = {Q0: torch.tensor([], dtype=torch.long)}
-    rep = quant_persona_probe(
-        tiny_model, tokenizer, ROWS, prompts=PROMPTS, n_boot=20, keep_per_question=True,
-        conditions={"none": (none, 4), "all2": (all_layers, 2)})
-    assert rep["conditions"]["none"]["retention"] == pytest.approx(1.0)
-    assert rep["conditions"]["none"]["generic_damage"] == pytest.approx(0.0, abs=1e-9)
-    assert rep["conditions"]["all2"]["generic_damage"] > 0
-    lo, hi = rep["conditions"]["all2"]["ci95"]
-    assert lo <= rep["conditions"]["all2"]["retention"] <= hi
-    assert len(rep["per_question"]["conditions"]["all2"]["seek"]) == len(ROWS)

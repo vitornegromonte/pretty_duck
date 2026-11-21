@@ -20,8 +20,21 @@ import sys
 from pathlib import Path
 
 from compress import stats as stats_mod
-from compress.cli import _load_model, _parse_pairs
+from compress.models import load_model
 from compress.sensitivity import measure_plans, measure_sensitivity
+
+
+def parse_pairs(values: list[str], what: str) -> dict[str, str]:
+    """Parse repeated ``name=path`` arguments into a dict."""
+    out: dict[str, str] = {}
+    for value in values:
+        if "=" not in value:
+            raise SystemExit(f"--{what} expects name=path, got {value!r}")
+        name, path = value.split("=", 1)
+        if name in out:
+            raise SystemExit(f"--{what} {name!r} given more than once")
+        out[name] = path
+    return out
 
 
 def read_lines(path: str, seed: int) -> list[str]:
@@ -46,7 +59,7 @@ def main() -> None:
     p.add_argument("--out", required=True)
     args = p.parse_args()
 
-    files = _parse_pairs(args.eval, "eval")
+    files = parse_pairs(args.eval, "eval")
     if not files:
         raise SystemExit("provide at least one --eval domain=file.txt")
     formats = args.formats.split(",")
@@ -59,7 +72,7 @@ def main() -> None:
         measure[d] = lines[: args.n_measure]
         heldout[d] = lines[args.n_measure: args.n_measure + args.n_heldout]
 
-    model, tokenizer = _load_model(args.model_path)
+    model, tokenizer = load_model(args.model_path)
     log = lambda m: print(m, file=sys.stderr, flush=True)
     kw = dict(batch_size=args.batch_size, max_len=args.max_len, log=log)
 

@@ -26,7 +26,7 @@ import torch
 
 from compress.circuit import (Scanner, Unit, build_facts, core_units, enumerate_units, excluding,
                               make_pairs, match_random, scan_neurons, split_facts, top_units, unit_sets)
-from compress.cli import _load_model
+from compress.models import load_model
 from compress.facts import FACTS, TEMPLATES
 
 log = lambda m: print(m, file=sys.stderr, flush=True)
@@ -53,7 +53,7 @@ def main() -> None:
 
     probe = json.loads(Path(args.probe).read_text())
     domains, seed, mlp_group = list(probe["domains"]), probe["config"]["seed"], probe["config"]["mlp_group"]
-    model, tokenizer = _load_model(args.model_path)
+    model, tokenizer = load_model(args.model_path)
     groups = enumerate_units(model, mlp_group)
     by_key = {(u.layer, u.start, u.stop): u for u in groups}
     layers = sorted(unit_sets(groups))

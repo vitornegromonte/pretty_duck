@@ -1,13 +1,16 @@
-"""Domain-aware weight compression pipeline (started from the Persona method; no Persona code is used).
+"""Domain-aware low-bit quantization of language models, with interpretability tests.
 
 Modules:
-    stats      -- per-domain, per-channel activation statistics (E|h|, E[h^2])
-    quant      -- quantization formats (simulated + packed, optional bitsandbytes)
-    allocate   -- greedy heterogeneous bit allocation per Linear block
-    serialize  -- materialize a plan to disk and measure real artifact bytes
-    evaluate   -- multiple-choice evaluation (letter or option scoring)
-    cli        -- collect_stats / estimate_quant_error / allocate_bits /
-                  quantize_model / evaluate_compression
+    models       -- load a causal LM and its tokenizer the same way everywhere
+    mmlu         -- cached MMLU question files
+    facts        -- templated factual-recall domains (capitals, elements, french)
+    evaluate     -- multiple-choice and next-token scoring
+    stats        -- per-channel activation statistics from calibration text
+    quant        -- quantization formats and exact storage sizes
+    quant_probe  -- fake quantization (whole matrices, groups, chosen columns)
+    gptq         -- GPTQ with protected columns, clipping, and a low-rank correction
+    protect      -- whole-model quantization with columns kept at full precision
+    sensitivity  -- measured damage of quantizing one layer at a time
+    pair_patching, circuit -- activation patching and circuit discovery
+    provenance   -- code, software, and hardware record stored in result files
 """
-
-__version__ = "0.1.0"

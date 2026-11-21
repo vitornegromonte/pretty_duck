@@ -20,4 +20,4 @@ jobs:
       - name: Tests (offline, CPU)
         run: python -m pytest -q
       - name: Lint (informational until the baseline is clean)
-        run: ruff check compress scripts tests experiments --exit-zero
+        run: ruff check src scripts tests --exit-zero

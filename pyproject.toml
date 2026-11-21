@@ -17,17 +17,17 @@ dependencies = [
 dev = ["pytest", "ruff"]
 gpu = ["bitsandbytes"]  # only for the bnb_nf4 format
 
-[tool.setuptools]
-# Flat layout for now. The plan moves the package to src/ (docs/reviews/advisor-2026-11/03_proposta_organizacao_repositorio.md).
-packages = ["compress"]
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = ["src", "."]
 
 [tool.ruff]
 line-length = 120
 target-version = "py310"
+src = ["src", "tests"]
 extend-exclude = ["outputs", "graphify-out", ".cache", "docs"]
 
 [tool.ruff.lint]

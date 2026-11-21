@@ -7,7 +7,7 @@ is persona-related only if it restores more of the *real* pair than of the
 shuffled one.
 
     PYTHONPATH=. python scripts/persona_patch.py --model-path Qwen/Qwen3.5-0.8B \
-        --stats outputs/stats_persona.pt --test Persona/data/wealth_test_infer.csv \
+        --stats outputs/stats_persona.pt --test data/persona/wealth_test_infer.csv \
         --out outputs/persona_patch.json
 """
 

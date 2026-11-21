@@ -6,7 +6,7 @@
                                            --error-budget 1e-3 --out plan.json
     python -m compress quantize_model      --model-path M --plan plan.json --out-dir out/compressed
     python -m compress evaluate_compression --model-path M [--compressed-dir out/compressed] \
-                                            --test wealth=Persona/data/wealth_test_infer.csv --out report.json
+                                            --test wealth=data/persona/wealth_test_infer.csv --out report.json
 """
 
 from __future__ import annotations

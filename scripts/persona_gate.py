@@ -9,10 +9,10 @@ so a positive margin means "prefers the persona-matching answer".  A
 sub-network for the behavior can only exist if the prompt moves this margin;
 the headline number is the paired seek-minus-reject shift with a bootstrap CI.
 
-Prompts are the wealth prompts from Persona/contra.py (phase3_multiple_choice).
+Prompts are the wealth prompts of the original Persona evaluation (Ye et al., 2026).
 
     PYTHONPATH=. python scripts/persona_gate.py --model-path HuggingFaceTB/SmolLM-135M \
-        --test Persona/data/wealth_test_infer.csv --out outputs/persona_gate_wealth.json
+        --test data/persona/wealth_test_infer.csv --out outputs/persona_gate_wealth.json
 """
 
 from __future__ import annotations

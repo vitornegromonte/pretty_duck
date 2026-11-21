@@ -11,7 +11,7 @@ Compares, at comparable storage budgets:
     hetero_error        -- heterogeneous allocation on estimated target error
     hetero_contrastive  -- same, with contrastive importance as auxiliary signal
 
-Target domain = wealth (Persona/data/wealth_*), secondary = honesty (h_*).
+Target domain = wealth (data/persona/wealth_*), secondary = honesty (h_*).
 """
 
 import json
@@ -27,7 +27,7 @@ from compress.stats import load_stats
 
 MODEL = sys.argv[1] if len(sys.argv) > 1 else "HuggingFaceTB/SmolLM-135M"
 OUT = Path("outputs") / MODEL.split("/")[-1].lower()
-DATA = Path("Persona/data")
+DATA = Path("data/persona")
 SIZE_FRACTION = 0.5  # heterogeneous runs target 50% of the fp16 Linear payload
 LAM = 0.5
 PROMPT_STYLE = os.environ.get("PROMPT_STYLE", "auto")  # plain for base checkpoints

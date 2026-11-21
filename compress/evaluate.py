@@ -1,4 +1,4 @@
-"""Multiple-choice evaluation, same scoring as Persona/contra.py.
+"""Multiple-choice evaluation, option scoring by answer log-probability.
 
 Each question offers options A and B; the model picks the option with the
 higher log-probability of the answer tokens (prompt tokens excluded from the
@@ -28,7 +28,7 @@ def build_prompt(
 
     ``auto`` uses the tokenizer's chat template when it has one and plain
     completion otherwise.  Base checkpoints without SFT are better served by
-    ``plain``; ``llama2`` reproduces the original Persona/contra.py wrapper.
+    ``plain``; ``llama2`` uses the Llama-2 ``[INST]`` wrapper of the original Persona evaluation.
     """
     if style not in PROMPT_STYLES:
         raise ValueError(f"unknown prompt style {style!r}")

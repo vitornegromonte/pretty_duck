@@ -4,7 +4,7 @@ Each CSV row (question, matching, not_matching) becomes one single-line sample
 per side: ``"<question> <answer>"``.  Parsing with ``csv`` keeps multi-line
 fields intact, unlike reading the raw file line by line.
 
-    python scripts/make_persona_calib.py Persona/data/wealth_train.csv --out-dir outputs/persona_calib
+    python scripts/make_persona_calib.py data/persona/wealth_train.csv --out-dir outputs/persona_calib
 """
 
 from __future__ import annotations

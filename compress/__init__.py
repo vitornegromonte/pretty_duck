@@ -1,11 +1,11 @@
-"""Domain-aware weight compression pipeline built on top of the Persona code.
+"""Domain-aware weight compression pipeline (started from the Persona method; no Persona code is used).
 
 Modules:
     stats      -- per-domain, per-channel activation statistics (E|h|, E[h^2])
     quant      -- quantization formats (simulated + packed, optional bitsandbytes)
     allocate   -- greedy heterogeneous bit allocation per Linear block
     serialize  -- materialize a plan to disk and measure real artifact bytes
-    evaluate   -- multiple-choice evaluation (same protocol as Persona/contra.py)
+    evaluate   -- multiple-choice evaluation (letter or option scoring)
     cli        -- collect_stats / estimate_quant_error / allocate_bits /
                   quantize_model / evaluate_compression
 """

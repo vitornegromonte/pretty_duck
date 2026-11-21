@@ -8,7 +8,7 @@ sum_ij E_ij^2 V_j (V from the seek stats), so equal-dose comparisons are
 visible.  ``bits`` below 4 are intervention strengths only (nothing is stored).
 
     PYTHONPATH=. python scripts/persona_quant.py --model-path Qwen/Qwen3.5-0.8B \
-        --stats outputs/stats_persona.pt --test Persona/data/wealth_test_infer.csv \
+        --stats outputs/stats_persona.pt --test data/persona/wealth_test_infer.csv \
         --out outputs/persona_quant.json
 """
 

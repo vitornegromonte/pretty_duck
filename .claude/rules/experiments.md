@@ -13,16 +13,16 @@ These rules protect the scientific claims of the project. They come from the pro
 
 ## Reproducibility and experiments **(project)**
 
-These rules protect the scientific claims of the project.
-
 1. **Seeds.** Every random choice takes a seed from an argument. The default is 42. Record the seed in the output file.
 2. **Weights must be restored.** Any intervention that changes model weights or adds hooks uses a context manager.
-   The weights must be bit-identical after exit, also after an exception. Test this.
+   The weights must be bit-identical after exit, also after an exception. Add every new manager to `tests/test_restore_and_identity.py`.
 3. **Forward-only.** Do not add gradients, fine-tuning, or auxiliary networks to the main method without a decision in an ADR.
 4. **Label what is measured.** Mark each number as measured, estimated, or simulated. All quantization here is
    simulated on dequantized weights. Do not claim a speedup.
 5. **Equal budgets.** Compare protected sets of the same size in weights and bytes. Count bytes with the exact format
-   formulas (`plan_nbytes`), never with nominal bits.
+   formulas (`plan_nbytes`), never with nominal bits. When you protect scattered columns with RTN, use
+   `MixedQuant(keep_blocks=True)` so the 64-column block boundaries do not move. GPTQ still forms new blocks over the
+   remaining columns (known limit). Protecting zero columns must equal uniform (tested).
 6. **Controls.** A comparison needs a control of the same size and class, a random set drawn many times, and a
    null distribution over sets. A confidence interval over questions does not measure the uncertainty of a selection rule.
 7. **Metrics.** Do not use letter accuracy of one quantized model as the only damage metric. Report a continuous metric
@@ -36,7 +36,7 @@ These rules protect the scientific claims of the project.
     the choice in the ADR.
 11. **Negative results count.** Record them in `docs/adr/` with numbers and caveats.
 12. **Determinism.** Accumulate Hessians and statistics in float64 or float32 with a fixed order. Do not rely on TF32.
-    Record the GPU, the dtype, and the batch size in each result file.
+    Store `compress.provenance.provenance()` in each result file (commit, dirty flag, software, GPUs, dtype).
 
 ## Data, results, and files
 

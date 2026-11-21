@@ -7,81 +7,41 @@ paths:
   - "tests/**/*.py"
 ---
 
-# Python code standards
+# Python rules
 
-All new code and all changes to existing code must follow these standards.
-Priorities, in order: correctness, reproducibility, readability, maintainability, simplicity.
+Style, imports, and common mistakes (mutable defaults, bare `except`, wildcard imports) are enforced by `ruff`
+(see `[tool.ruff]` in `pyproject.toml`). Run `make lint`. Do not rewrite an old file only to satisfy the linter.
+Fix it when you change it for another reason. The rules below are what the linter cannot check.
 
-Rules marked **(project)** come from the needs of this repository (low-bit quantization experiments on LLMs).
-Where an old file breaks a rule, do not rewrite it only to comply. Fix it when you change it for another reason.
+## Design
 
-## General design principles
+- Prefer functions and small dataclasses. Use a class when an object must hold or restore state, for example a context
+  manager that changes model weights and puts them back (`MixedQuant`, `GPTQQuant`). Do not build class hierarchies for experiments.
+- Make dependencies explicit: pass them as arguments. Isolate side effects.
+- Put logic in `compress/`. Keep `scripts/` thin: parse arguments, build the experiment, run it, save the result.
+  Write results to files, not to stdout. Scripts may write progress to stderr with one `log` helper.
+- Use `logging`, not `print()`, in library code under `compress/`.
+- Use a dataclass or a typed structure for a data contract such as a result row.
 
-Follow these principles:
+## Interfaces
 
-- SOLID: apply object-oriented principles where they improve maintainability.
-- DRY: avoid unnecessary duplication. Move code to a shared module when a third copy appears.
-- KISS: prefer simple solutions over complex ones.
-- YAGNI: do not implement features that are not required now.
-- Composition over inheritance: combine small, focused components.
-- Separation of concerns: keep unrelated responsibilities apart.
-- Dependency inversion: depend on stable abstractions, not on concrete implementations.
-
-Additional requirements:
-
-- Prefer readable code over clever code.
-- Make dependencies explicit. Pass them as arguments.
-- Keep side effects isolated.
-- Avoid hidden behavior and implicit dependencies.
-- Avoid premature optimization. Measure first.
-- Avoid unnecessary abstractions and frameworks.
-
-**(project)** This code base prefers functions and small dataclasses. Use a class when an object must hold state or
-restore state, for example a context manager that changes model weights and puts them back (`MixedQuant`, `GPTQQuant`).
-Do not build class hierarchies for experiments.
-
-## Python standards
-
-- Follow PEP 8. Use `ruff` for formatting and lint checks when it is configured.
-- Add type hints to public functions, methods, and important internal interfaces.
-- Use descriptive names. Write units and shapes in names or docstrings (`out_features`, `n_questions`, `bits`).
-- Prefer explicit keyword arguments to long positional argument lists.
-- Use `pathlib` for filesystem paths.
-- Use context managers for resources that need cleanup.
-- Use structured logging (`logging`) instead of `print()` in library code under `compress/`.
-- Use specific exception types. Write error messages that name the bad value.
-- Do not use bare `except` clauses. Do not swallow exceptions.
-- Do not use mutable default arguments.
-- Do not use wildcard imports.
-- Avoid global state. Keep module-level state to constants.
-- Use constants for shared configuration values (prompts, seeds, default sizes).
-- Order imports: standard library, third party, local. Separate the groups with a blank line.
-- Prefer the standard library when it is enough.
-- Use dataclasses or typed structures for important data contracts, for example a result row.
-- Keep each function focused on one responsibility. Split a function that needs a long comment to explain its sections.
-- Keep each class cohesive.
-- Write a docstring for every public function. State what it returns, the shapes of tensors, and what it changes.
-
-**(project)** Command-line scripts in `scripts/` may write progress lines to stderr with one shared `log` helper.
-They must write results to files, not to stdout. New scripts must keep `main()` short:
-parse arguments, build the experiment, run it, save the result. Put the logic in `compress/`.
+- Add type hints to public functions. Write units and shapes in names or docstrings (`out_features`, `n_questions`, `bits`).
+- Write a docstring for every public function: what it returns, the shapes of tensors, and what it changes.
+- Use specific exception types. Name the bad value in the message.
 
 ## Testing
 
-- Run `python -m pytest -q` from the repository root before you finish. Tests must run offline and on CPU.
-- Add a test for every new behavior and for every bug you fix. Write the failing test first when you can.
-- Use the tiny model and tokenizer fixtures in `tests/conftest.py`. Do not download models in tests.
-- Test properties, not only examples: a restored weight is bit-identical, a protected set of zero columns equals the
-  uniform result, a quantized value lies on the grid, a patch of all units reproduces the clean run.
-- Compare to an independent reference when one exists (for example the authors' GPTQ code).
+- Run `make test` before you finish. Tests run offline and on CPU. Use the tiny fixtures in `tests/conftest.py`. Do not download models.
+- Add a test for every new behavior and every bug you fix. Write the failing test first when you can.
+- Test properties, not only examples: weights are restored bit for bit (`tests/test_restore_and_identity.py`),
+  protecting zero columns equals uniform, a quantized value lies on the grid, patching all units reproduces the clean run.
+- Compare with an independent reference when one exists (for example the authors' GPTQ code).
 - Do not weaken a test to make it pass. If an expected value was wrong, say so in the commit message.
-- Mark tests that need a GPU with `pytest.mark.skipif` and say why.
-- Do not claim that a test, command, or experiment works unless you ran it.
+- Mark tests that need a GPU with `pytest.mark.skipif` and state why.
 
-## Performance and resources **(project)**
+## Resources
 
-- Assume the GPU is shared and small. A 4B model in fp16 uses about 8.4 GB. Keep copies of weights on the host
-  (`offload=True`) when memory is short.
+- Assume the GPU is shared and small. A 4B model in fp16 uses about 8.4 GB. Keep saved weights on the host (`offload=True`) when memory is short.
 - Do not keep activations or full-vocabulary logits you do not need. Use last-position logits.
-- Batch work when the result does not change. Prove that with a test.
-- Measure time and peak memory before you optimize, and report them when you claim a cost.
+- Measure time and peak memory before you optimize. Report them when you claim a cost.
+- Batch work only when the result does not change. Prove it with a test.

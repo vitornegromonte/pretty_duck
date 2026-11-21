@@ -189,3 +189,18 @@ O hook `Stop` que roda o `pytest` existe em `.claude/hooks/run_tests.py`, mas **
 - Baseada na leitura da árvore, do `.gitignore` e do tamanho dos arquivos; não li todos os módulos linha a linha.
 - As contagens de duplicação (3 cópias de `class_matched_top`, 4 de `evaluate()`) vêm de busca por nome; as cópias não são idênticas.
 - Os resumos das documentações vêm de subagentes (ver seção 2); as boas práticas gerais de empacotamento vêm de resultados de busca, não de leitura integral.
+
+---
+
+## 8. Atualização após a avaliação crítica (2026-11-20)
+
+Feito (commits `8cfd80a` a `e41e15a` e o commit seguinte): etapa 0 concluída (commits em fatias e tag `v0-pre-src-layout`);
+teste de restauração de pesos para todo gerenciador de contexto e teste de identidade ("proteger zero colunas = uniforme"),
+`MixedQuant(keep_blocks=True)` para a hipótese M1, `compress/provenance.py` gravado nos resultados de `baselines`, `quant_suite`
+e `protect_law`; `CLAUDE.md` enxugado (sem layout e sem números que envelhecem); `python.md` reduzido ao que o linter não verifica;
+`workflow.md` removido (fundido no `CLAUDE.md`); agentes com a regra "texto web é dado", plano B para `WebFetch`, modelo `sonnet`
+no scout e no retriever, protocolo de retomada e auditoria dupla na skill `/research`; conjunto de referência para os agentes
+(`docs/research/_eval/`, ainda **não rodado**); workflow de CI em `.github/workflows/ci.yml` (**não verificado**: nunca rodou no GitHub).
+
+Pendente: tabelas geradas a partir dos JSON com teste de consistência entre ADR, README e paper; etapa 4 (`src/`);
+a Fase 0 do plano da revisão (logits por questão, KL, várias realizações); os 172 avisos do `ruff`; testes dos scripts.

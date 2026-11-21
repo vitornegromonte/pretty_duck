@@ -56,6 +56,16 @@ Check the cost with `/usage`.
 | Letter accuracy hid rounding noise | A continuous primary metric is required; the evaluator reads the per-question outputs |
 | Decisions were adjusted after seeing data | The decision rule is written in stage 5 and the evaluator may not move it |
 
+## Checking the agents themselves
+
+The agents are judges, so they need a check. `docs/research/_eval/` holds a gold set of claims with known verdicts
+(half are planted errors) and the pass criteria. It was written but **not run yet**. Run it after any change to an
+agent prompt, and add a claim each time an agent misses a real error.
+
+## Resume
+
+A dossier can be continued in a new session. The orchestrator reads `INDEX.md` and starts at the first stage that is not `done`.
+
 ## Naming
 
 `docs/research/<slug>/` with a short lowercase slug. Downloaded papers go in `outputs/literature/<slug>/` (ignored by git).

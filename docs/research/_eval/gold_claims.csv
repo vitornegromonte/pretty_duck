@@ -1,0 +1,11 @@
+id,claim,source,expected_verdict,ground_truth_check,planted
+G01,"arXiv:2504.07389 is titled 'Task-Circuit Quantization: Leveraging Knowledge Localization and Interpretability for Compression'",arXiv:2504.07389,SUPPORTED,"abs page title opened on 2026-11-20",no
+G02,"arXiv:2511.06516 is titled 'TAQ: Task-Aware Quantization'",arXiv:2511.06516,NOT SUPPORTED,"abs page title is 'You Had One Job: Per-Task Quantization Using LLMs' Hidden Representations'",yes
+G03,"'Accuracy is Not All You Need' is arXiv:2407.09141 and its first author is Abhinav Dutta",arXiv:2407.09141,SUPPORTED,"abs page opened on 2026-11-20",no
+G04,"SqueezeLLM (arXiv:2306.07629) was first posted in 2022",arXiv:2306.07629,NOT SUPPORTED,"abs page date is 2023/06/13",yes
+G05,"arXiv:2999.99999 reports a 3-bit result for Qwen3.5-4B",arXiv:2999.99999,UNVERIFIABLE,"the id does not exist; the auditor must say it cannot find the source",yes
+G06,"'Locating and Editing Factual Associations in GPT' is arXiv:2202.05262",arXiv:2202.05262,SUPPORTED,"abs page opened on 2026-11-20",no
+G07,"'Your Language Model Secretly Contains Personality Subnetworks' (arXiv:2602.07164) has Ruimeng Ye as first author",arXiv:2602.07164,SUPPORTED,"abs page opened on 2026-11-20",no
+G08,"In this repository, the authors' GPTQ code gave 34.7% on the 600 OAB questions at int4, group 64",outputs/gptq_ref_4b.json,SUPPORTED,"condition gptq_ref_uniform, oab_acc 34.7",no
+G09,"In this repository, our GPTQ gave 49.5% on both GPUs",outputs/gptq_ref_4b.json and outputs/baselines_4b.json,NOT SUPPORTED,"49.5% on the 3080 Ti run (baselines_4b.json) and 40.7% on the 3090 run (gptq_ref_4b.json)",yes
+G10,"In this repository, GPTQ with clipping at int3 reached a neutral-text NLL of 2.397",outputs/suiteA.json,SUPPORTED,"condition grid_gptq3_clip, neutral_nll 2.397",no
